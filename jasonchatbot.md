@@ -132,7 +132,14 @@ through the client's API), self-hosted option.
 
 ## 3. Technology stack
 
-Chosen for: one language end to end, streaming chat, 1,000 client companies on modest hardware,
+> **What is actually built (v0.1, 2026-11-21):** James asked to use the MySQL on jasonvps and a temp domain, and to
+> get as far as possible in one night. So v0.1 is **PHP 8.5 API + MySQL 8.4 (FULLTEXT search, no vectors yet) +
+> React/Vite/TypeScript dashboard + vanilla JS widget**, on jasonvps (CloudPanel) at **bot.pennybiddeals.com**.
+> This reuses the patterns and tooling already proven on Penny. Answers are not streamed; the agent inbox polls
+> every 4 s instead of WebSockets. Fine for the beta; the table below is still the target if load or answer quality
+> needs it (vectors first, then streaming). See CLAUDE.md for what exists and how to deploy.
+
+Original plan, chosen for: one language end to end, streaming chat, 1,000 client companies on modest hardware,
 and a solo developer plus Claude doing the building.
 
 | Part | Choice | Why |
