@@ -1,7 +1,9 @@
 /* Chat widget. A company pastes one line on its website:
  *   <script src="https://bot.pennybiddeals.com/widget.js" data-key="COMPANY_KEY" async></script>
- * Optional: data-lang="en|es" (default: the visitor's browser). Plain JS, no libraries, no cookies. The open chat is kept in
- * this browser tab only (sessionStorage). Everything is drawn inside a Shadow DOM so the host site's CSS can't break it. */
+ * Optional: data-lang="en|es" (default: the visitor's browser). Plain JS, no libraries, no cookies. The chat and a random
+ * visitor key are kept in this browser (localStorage) so earlier chats show above a new one. A chat ends when the visitor
+ * clicks X or New chat, or after 30 minutes without messages (server); typing after that starts a new chat.
+ * Everything is drawn inside a Shadow DOM so the host site's CSS can't break it. */
 (function () {
   var me = document.currentScript;
   if (!me || window.__jcbLoaded) return;
@@ -15,18 +17,30 @@
       saved: 'This chat is saved so our team can help you.', sources: 'Source', waiting: 'A person will reply here.', hi: 'Hi ', help: '! How can we help?',
       powered: 'AI assistant. Answers can be wrong; ask for a person anytime.', online: 'Team online', offline: 'Leave a message',
       attach: 'Send a file', mailMe: 'Email me this chat', yourEmail: 'Your email', save: 'Save', sending: 'Sending…',
-      modeAi: '🤖 AI assistant', modeLive: '👤 Live person', modeWait: 'Waiting for a person…', modeOn: 'Connected to ', modeMsg: '👤 Leave a message' },
+      modeAi: '🤖 AI assistant', modeLive: '👤 Live person', modeWait: 'Waiting for a person…', modeOn: 'Connected to ', modeMsg: '👤 Leave a message',
+      ended: 'This chat has ended. Type a message to start a new one.', earlier: 'Earlier chat · ' },
     es: { chat: 'Chatee con nosotros', name: 'Su nombre', email: 'Correo (opcional)', dept: '¿Sobre qué es?', start: 'Iniciar chat', ask: 'Escriba su mensaje…',
       send: 'Enviar', typing: 'Escribiendo…', human: 'Hablar con una persona', newChat: 'Nuevo chat', close: 'Cerrar', err: 'Algo salió mal. Inténtelo de nuevo.',
       saved: 'Guardamos este chat para que nuestro equipo pueda ayudarle.', sources: 'Fuente', waiting: 'Una persona le responderá aquí.', hi: '¡Hola ', help: '! ¿En qué le podemos ayudar?',
       powered: 'Asistente de IA. Las respuestas pueden tener errores; pida una persona cuando quiera.', online: 'Equipo en línea', offline: 'Dejar un mensaje',
       attach: 'Enviar un archivo', mailMe: 'Enviarme este chat por correo', yourEmail: 'Su correo', save: 'Guardar', sending: 'Enviando…',
-      modeAi: '🤖 Asistente de IA', modeLive: '👤 Persona en vivo', modeWait: 'Esperando a una persona…', modeOn: 'Conectado con ', modeMsg: '👤 Dejar un mensaje' }
+      modeAi: '🤖 Asistente de IA', modeLive: '👤 Persona en vivo', modeWait: 'Esperando a una persona…', modeOn: 'Conectado con ', modeMsg: '👤 Dejar un mensaje',
+      ended: 'Este chat terminó. Escriba un mensaje para iniciar uno nuevo.', earlier: 'Chat anterior · ' }
   }[lang];
-  var STORE = 'jcb_chat_' + KEY;
-  var get = function () { try { return JSON.parse(sessionStorage.getItem(STORE) || 'null'); } catch (e) { return null; } };
-  var put = function (v) { try { v ? sessionStorage.setItem(STORE, JSON.stringify(v)) : sessionStorage.removeItem(STORE); } catch (e) {} };
-  var chat = get();   // {conv, token, name, email, last, log:[{role, body, sources, file}]}
+  // Kept in this browser (localStorage), so a returning visitor sees their earlier chats: the open chat, their name/email/
+  // department for the start form, and a random visitor key the server uses to find their past chats. No cookies.
+  var STORE = 'jcb_chat_' + KEY, PROFILE = 'jcb_p_' + KEY, VKEY = 'jcb_v_' + KEY;
+  var load = function (k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
+  var save = function (k, v) { try { v ? localStorage.setItem(k, JSON.stringify(v)) : localStorage.removeItem(k); } catch (e) {} };
+  var get = function () { return load(STORE); };
+  var put = function (v) { save(STORE, v); };
+  var visitor = load(VKEY);
+  if (!/^[a-f0-9]{32}$/.test(visitor || '')) {
+    var rnd = new Uint8Array(16); (window.crypto || window.msCrypto).getRandomValues(rnd);
+    visitor = Array.prototype.map.call(rnd, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    save(VKEY, visitor);
+  }
+  var chat = get();   // {conv, token, name, email, dept, last, closed, log:[{role, body, sources, file}]}
   var cfg = null, pollTimer = null;
 
   function req(method, q, body) {
@@ -73,7 +87,8 @@
       + '.md{display:flex;gap:4px;padding:6px;background:#fff;border-bottom:1px solid #e5e7eb}'
       + '.md button{flex:1;border:1px solid #d1d5db;background:#f9fafb;color:#374151;border-radius:999px;padding:6px 8px;font-size:12px;font-weight:700;cursor:pointer}'
       + '.md button[aria-pressed=true]{background:' + c + ';border-color:' + c + ';color:#fff}'
-      + '.ms{font-size:11px;color:#6b7280;text-align:center;padding:3px 8px;background:#fff;border-bottom:1px solid #e5e7eb}';
+      + '.ms{font-size:11px;color:#6b7280;text-align:center;padding:3px 8px;background:#fff;border-bottom:1px solid #e5e7eb}'
+      + '.old{opacity:.6}.old .n{border-top:1px dashed #d1d5db;padding-top:6px}';
     root.appendChild(css);
     var bubble = el('button', 'b', '💬'); bubble.setAttribute('aria-label', S.chat);
     var panel = el('div', 'p'); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', cfg.company);
@@ -111,18 +126,19 @@
     panel.append(head, modeBar, modeNote, log, form, foot); root.append(bubble, panel);
     showMode(false);   // shown once the chat has started
 
-    function line(role, text, sources, file) {
-      if (role === 'system') { var n = el('p', 'n', text); log.append(n); log.scrollTop = log.scrollHeight; return n; }
+    function line(role, text, sources, file, into) {
+      var dst = into || log;
+      if (role === 'system') { var n = el('p', 'n', text); dst.append(n); log.scrollTop = log.scrollHeight; return n; }
       var b = el('div', 'q ' + (role === 'user' ? 'u' : role === 'agent' ? 'g' : 'a'), file ? null : text);
       if (file) {   // a file: link (and a small picture for images). The URL comes from our server, never from page text.
         var a = el('a', '', '📎 ' + file.name); a.href = file.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; b.append(a);
         if (/^image\//.test(file.mime || '')) { var im = el('img'); im.alt = file.name; im.onload = function () { log.scrollTop = log.scrollHeight; }; im.src = file.url; b.append(im); }   // scroll again once the picture has its real height
       }
-      log.append(b);
+      dst.append(b);
       if (sources && sources.length) {
         var s = el('div', 's', S.sources + ': ');
         sources.forEach(function (x, i) { var a = el('a', '', x.title || x.url); a.href = x.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; if (i) s.append(' · '); s.append(a); });
-        log.append(s);
+        dst.append(s);
       }
       log.scrollTop = log.scrollHeight;
       return b;
@@ -141,35 +157,69 @@
       });
     }
 
+    // Start a chat on the server and remember who this is (name/email/department prefill the form next time).
+    function startConv(p) {
+      return req('POST', 'a=start&k=' + encodeURIComponent(KEY), { name: p.name, email: p.email || '', department: p.dept || '', page: location.href, v: visitor })
+        .then(function (j) {
+          chat = { conv: j.conv, token: j.token, name: j.name, email: (p.email || '').trim(), dept: p.dept || '', last: 0, log: [] };
+          put(chat); save(PROFILE, { name: j.name, email: chat.email, dept: chat.dept });
+        });
+    }
+    // The visitor typed into a chat that has ended: open a new one with the same details, then carry on.
+    function ensureOpen() {
+      if (!chat.closed) return Promise.resolve();
+      return startConv({ name: chat.name, email: chat.email, dept: chat.dept }).then(talk);
+    }
+    // Tell the server this chat is over (X or New chat). It stays closed until the visitor starts a new one.
+    function endChat() {
+      if (chat && !chat.closed) req('POST', 'a=end&c=' + chat.conv + '&t=' + chat.token).catch(function () {});
+      put(null); chat = null;
+    }
+
     function intro() {
       stopPoll(); log.textContent = ''; form.style.display = 'none'; foot.style.display = 'none'; newBtn.style.display = 'none'; showMode(false);
+      var me = load(PROFILE) || {};
       var f = el('form', 'i');
       f.append(el('p', '', cfg.greeting || S.chat));
       var nm = el('input'); nm.placeholder = S.name; nm.required = true; nm.maxLength = 80; nm.autocomplete = 'name'; nm.setAttribute('aria-label', S.name);
+      nm.value = me.name || '';
       nm.addEventListener('blur', function () { nm.value = titleCase(nm.value); });
       f.append(nm);
       var em = null;
-      if (cfg.ask_email) { em = el('input'); em.type = 'email'; em.placeholder = S.email; em.maxLength = 190; em.autocomplete = 'email'; em.setAttribute('aria-label', S.email); f.append(em); }
+      if (cfg.ask_email) { em = el('input'); em.type = 'email'; em.placeholder = S.email; em.maxLength = 190; em.autocomplete = 'email'; em.setAttribute('aria-label', S.email); em.value = me.email || ''; f.append(em); }
       var dp = null;
       if (cfg.departments && cfg.departments.length > 1) {
         dp = el('select'); dp.setAttribute('aria-label', S.dept);
         cfg.departments.forEach(function (d) { var o = el('option', '', d); o.value = d; dp.append(o); });
+        if (me.dept && cfg.departments.indexOf(me.dept) >= 0) dp.value = me.dept;
         var lb = el('label', '', S.dept); lb.style.cssText = 'font-size:12px;color:#6b7280;margin-bottom:-4px'; f.append(lb, dp);
       }
       var go = el('button', 'k', S.start); var er = el('p', 'e'); f.append(go, el('p', 's', S.saved), er);
       f.addEventListener('submit', function (e) {
         e.preventDefault(); nm.value = titleCase(nm.value); go.disabled = true; er.textContent = '';
-        req('POST', 'a=start&k=' + encodeURIComponent(KEY), { name: nm.value, email: em ? em.value : '', department: dp ? dp.value : (cfg.departments[0] || ''), page: location.href })
-          .then(function (j) { chat = { conv: j.conv, token: j.token, name: j.name, email: em ? em.value.trim() : '', last: 0, log: [] }; put(chat); talk(); })
+        startConv({ name: nm.value, email: em ? em.value : '', dept: dp ? dp.value : (cfg.departments[0] || '') })
+          .then(talk)
           .catch(function (x) { er.textContent = x.message; go.disabled = false; });
       });
-      log.append(f); nm.focus();
+      log.append(f); (nm.value ? go : nm).focus();
     }
 
     function talk() {
       log.textContent = ''; form.style.display = 'flex'; foot.style.display = 'block'; newBtn.style.display = ''; liveLabel(); showMode(true);
+      var hist = el('div', 'old'); log.append(hist);   // earlier chats from this browser, filled in below
       line('bot', S.hi + chat.name + S.help);
       chat.log.forEach(function (m) { line(m.role, m.body, m.sources, m.file); });
+      if (chat.closed) line('system', S.ended);
+      var conv = chat.conv;
+      req('POST', 'a=history&k=' + encodeURIComponent(KEY), { v: visitor, exclude: conv }).then(function (j) {
+        if (!chat || chat.conv !== conv) return;
+        (j.chats || []).forEach(function (h) {
+          var d = new Date(String(h.started).replace(' ', 'T') + 'Z');
+          line('system', S.earlier + d.toLocaleString(lang, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }), null, null, hist);
+          h.messages.forEach(function (m) { line(m.role === 'visitor' ? 'user' : m.role, m.body, m.sources, m.file, hist); });
+        });
+        log.scrollTop = log.scrollHeight;
+      }).catch(function () {});
       box.focus(); startPoll();
     }
 
@@ -183,29 +233,39 @@
           line(role, m.body, m.sources, m.file); remember(role, m.body, m.sources, m.id, m.file);
           if (role === 'agent') { chat.toldWaiting = true; if (m.agent) chat.agent = m.agent; put(chat); liveLabel(); }
         });
+        // Ended (idle 30 min, or the team closed it): say so once. A team reply reopens it on the server.
+        if (j.closed && !chat.closed) { chat.closed = true; put(chat); line('system', S.ended); }
+        else if (!j.closed && chat.closed) { chat.closed = false; put(chat); }
       }).catch(function (x) { if (x.code === 'chat_ended') { put(null); chat = null; intro(); } });
     }
-    function startPoll() { stopPoll(); pollTimer = setInterval(poll, 4000); }
+    function startPoll() { stopPoll(); poll(); pollTimer = setInterval(poll, 4000); }
     function stopPoll() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
 
+    function say(q, retried) {
+      line('user', q); remember('user', q);
+      var wait = line('bot', S.typing);
+      return req('POST', 'a=say&c=' + chat.conv + '&t=' + chat.token, { text: q }).then(function (j) {
+        if (j.reply === null) { wait.remove(); if (!chat.toldWaiting) { line('system', S.waiting); chat.toldWaiting = true; put(chat); liveLabel(); } return; }
+        wait.remove(); line('bot', j.reply, j.sources); remember('bot', j.reply, j.sources, j.id);
+      }).catch(function (x) {
+        // It ended on the server since we last looked: start a new chat and send the message there.
+        if (x.code === 'chat_closed' && !retried) { chat.closed = true; chat.log.pop(); put(chat); return ensureOpen().then(function () { return say(q, true); }); }
+        wait.textContent = x.message;
+        if (x.code === 'chat_ended') { put(null); chat = null; setTimeout(intro, 1500); }
+      });
+    }
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var q = box.value.trim(); if (!q || send.disabled) return;
       box.value = ''; send.disabled = true;
-      line('user', q); remember('user', q);
-      var wait = line('bot', S.typing);
-      req('POST', 'a=say&c=' + chat.conv + '&t=' + chat.token, { text: q }).then(function (j) {
-        if (j.reply === null) { wait.remove(); if (!chat.toldWaiting) { line('system', S.waiting); chat.toldWaiting = true; put(chat); liveLabel(); } return; }
-        wait.remove(); line('bot', j.reply, j.sources); remember('bot', j.reply, j.sources, j.id);
-      }).catch(function (x) {
-        wait.textContent = x.message;
-        if (x.code === 'chat_ended') { put(null); chat = null; setTimeout(intro, 1500); }
-      }).then(function () { send.disabled = false; box.focus(); });
+      ensureOpen().then(function () { return say(q); })
+        .catch(function (x) { line('system', x.message); })
+        .then(function () { send.disabled = false; box.focus(); });
     });
     humanBtn.addEventListener('click', function () {
       if (!chat) return;
       humanBtn.disabled = true;
-      req('POST', 'a=human&c=' + chat.conv + '&t=' + chat.token).then(function (j) {
+      ensureOpen().then(function () { return req('POST', 'a=human&c=' + chat.conv + '&t=' + chat.token); }).then(function (j) {
         line('system', j.reply); remember('system', j.reply, null, j.id); chat.toldWaiting = true; put(chat); liveLabel();
         if (!j.online && j.need_email) askEmail(false);
       })
@@ -239,13 +299,17 @@
     function sendFile(f) {
       if (!f || !chat) return;
       if (f.size > 10 * 1024 * 1024) { line('system', lang === 'es' ? 'Ese archivo es muy grande (máximo 10 MB).' : 'That file is too big (10 MB maximum).'); return; }
-      var wait = line('system', S.sending); var fd = new FormData(); fd.append('file', f);
-      req('POST', 'a=upload&c=' + chat.conv + '&t=' + chat.token, fd).then(function (j) {
+      var fd = new FormData(); fd.append('file', f); var wait = null;
+      ensureOpen().then(function () {
+        wait = line('system', S.sending);
+        return req('POST', 'a=upload&c=' + chat.conv + '&t=' + chat.token, fd);
+      }).then(function (j) {
         wait.remove(); line('user', '', null, j.file); remember('user', '📎 ' + j.file.name, null, null, j.file);
-      }).catch(function (x) { wait.textContent = x.message; });
+      }).catch(function (x) { if (wait) wait.textContent = x.message; else line('system', x.message); });
     }
-    newBtn.addEventListener('click', function () { put(null); chat = null; intro(); });
-    closeBtn.addEventListener('click', function () { panel.style.display = 'none'; stopPoll(); bubble.focus(); });
+    // New chat and X both end this chat (transcript goes to the company); the next one starts from the form, already filled in.
+    newBtn.addEventListener('click', function () { endChat(); intro(); });
+    closeBtn.addEventListener('click', function () { endChat(); panel.style.display = 'none'; stopPoll(); bubble.focus(); });
     bubble.addEventListener('click', function () {
       var open = panel.style.display === 'flex';
       panel.style.display = open ? 'none' : 'flex';

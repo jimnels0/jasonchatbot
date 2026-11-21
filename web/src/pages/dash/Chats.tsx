@@ -8,7 +8,8 @@ type Row = { id: number; name: string; email: string; department: string; topic:
   mode: 'bot' | 'human'; handoff: number; unread: number; status: 'open' | 'closed'; page: string; created_at: string; last_at: string; msgs: number; last_msg: string };
 type Msg = { id: number; role: 'visitor' | 'bot' | 'agent' | 'system'; body: string; sources: { title: string; url: string }[]; answered: number; via: string; agent_name: string; created_at: string;
   file: { name: string; mime: string; size: number; url: string } | null };
-type Full = { chat: Row & { online?: boolean; user_agent?: string }; messages: Msg[]; mail_ready: boolean };
+type Past = { id: number; topic: string; status: 'open' | 'closed'; created_at: string; msgs: number };
+type Full = { chat: Row & { online?: boolean; user_agent?: string }; messages: Msg[]; past: Past[]; mail_ready: boolean };
 const place = (r: Pick<Row, 'city' | 'region' | 'country'>) => [r.city, r.region, r.country].filter(Boolean).join(', ') || '—';
 
 // The inbox: who is talking (name, location, department, topic), the transcript, and a reply box so a person can take over.
@@ -115,6 +116,13 @@ const Chats: React.FC<{ user: User; openId: number }> = ({ user, openId }) => {
                   <div key={k}><dt className="text-slate-400">{k}</dt><dd className="font-semibold truncate" title={v}>{v}</dd></div>))}
                 <div className="col-span-2"><dt className="text-slate-400">{t('chats.page')}</dt><dd className="truncate">{c.page ? <a className="underline" href={c.page} target="_blank" rel="noreferrer noopener">{c.page}</a> : '—'}</dd></div>
               </dl>
+              {chat!.past?.length > 0 && (
+                <div className="mt-3 text-xs">
+                  <p className="text-slate-400">{t('chats.past')} ({chat!.past.length})</p>
+                  <ul className="flex flex-wrap gap-1 mt-1">{chat!.past.map(p => (
+                    <li key={p.id}><a href={`#/app/chats/${p.id}`} className="inline-block rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 hover:underline">
+                      {when(p.created_at, lang)}{p.topic ? ` · ${p.topic}` : ''} · {p.msgs} ✉{p.status === 'open' ? ' ●' : ''}</a></li>))}</ul>
+                </div>)}
             </div>
             <div className="p-4 space-y-2 max-h-[55vh] overflow-y-auto bg-slate-50 dark:bg-slate-950">
               {chat!.messages.map(m => {

@@ -29,7 +29,15 @@ if (method() === 'GET' && isset($_GET['id'])) {
     $st->execute([$c['id']]);
     $msgs = array_map(fn($m) => ['sources' => $m['sources'] ? json_decode($m['sources'], true) : []] + $m, $st->fetchAll());
     $c['online'] = $c['visitor_seen_at'] && strtotime($c['visitor_seen_at'] . ' UTC') > time() - 45;
-    out(['chat' => $c, 'messages' => chat_attach_files($msgs), 'mail_ready' => mail_ready()]);
+    $past = [];   // other chats from the same browser (widget visitor key)
+    if ($c['visitor_hash'] !== '') {
+        $st = db()->prepare("SELECT id, topic, status, created_at, (SELECT COUNT(*) FROM messages m WHERE m.conv_id = c.id AND m.role = 'visitor') AS msgs
+                             FROM conversations c WHERE tenant_id = ? AND visitor_hash = ? AND id <> ? ORDER BY id DESC LIMIT 10");
+        $st->execute([$tid, $c['visitor_hash'], $c['id']]);
+        $past = $st->fetchAll();
+    }
+    unset($c['visitor_hash']);
+    out(['chat' => $c, 'messages' => chat_attach_files($msgs), 'past' => $past, 'mail_ready' => mail_ready()]);
 }
 
 if (method() === 'GET') {

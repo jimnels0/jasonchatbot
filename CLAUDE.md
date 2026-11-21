@@ -32,6 +32,13 @@ Product name is NOT decided: the placeholder "Jason Chatbot" lives in one consta
   Real type checked with finfo + extension allow-list (no SVG/HTML), stored OUTSIDE the web root in `/home/jcbot/chatfiles`,
   served only by `api/files.php?f=ID&k=KEY` (32-hex key, nosniff, sandbox CSP, non-images download). `lib/files.php`.
 - **Knowledge uploads:** PDF, Word (.docx, read with ZipArchive) and text (.txt/.md/.csv); `sources.kind` 'doc'.
+- **Chat end + memory (2026-11-21):** a chat closes (`status='closed'`) when the visitor clicks X or New chat (`widget.php?a=end`),
+  when the team closes it, or after 30 min without messages (`worker.php`, `CHAT_IDLE_MINUTES`). Closing triggers the
+  transcript email. say/human/upload on a closed chat answer 409 `chat_closed`; the widget then starts a new chat with the
+  same name/email/department and resends. poll returns `closed` (a team reply reopens it). The widget keeps the chat,
+  the visitor's details and a random 32-hex visitor key in localStorage (`jcb_chat_`/`jcb_p_`/`jcb_v_` + key); the server
+  stores only sha256 of the key (`conversations.visitor_hash`). `widget.php?a=history` returns that browser's last 3 chats
+  (90 days), shown greyed above the new chat; Chats in the dashboard lists "Earlier chats from this visitor".
 - **Email** (`lib/mail.php` SMTP, `lib/transcript.php`, all sent by `worker.php` so chats never wait on mail):
   team alert when a visitor asked for a person and nobody took it within 1 min; "Email me this chat" for visitors;
   team replies the visitor never saw (widget closed 2+ min) emailed to them; full transcript of every finished chat

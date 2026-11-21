@@ -170,6 +170,7 @@ const UPGRADES = [
   ['conversations', 'emailed_at', 'DATETIME NULL'],
   ['conversations', 'visitor_mail_at', 'DATETIME NULL'],                 // visitor asked "email me this chat" (pending until sent)
   ['conversations', 'user_agent', "VARCHAR(255) NOT NULL DEFAULT ''"],
+  ['conversations', 'visitor_hash', "CHAR(64) NOT NULL DEFAULT ''"],      // sha256 of the widget's per-browser visitor key (past chats)
   ['messages', 'file_id', 'INT NULL'],
   ['messages', 'delivered', 'TINYINT NOT NULL DEFAULT 0'],               // agent message seen by the widget (else emailed)
 ];

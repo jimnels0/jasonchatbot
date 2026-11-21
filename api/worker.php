@@ -25,6 +25,11 @@ while (time() - $started < 50) {
         echo "source {$s['id']}: " . $e->getMessage() . "\n";
     }
 }
+// Chats idle for CHAT_IDLE_MINUTES close by themselves (the visitor's next message starts a new chat); the transcript job
+// below then emails them to the company.
+const CHAT_IDLE_MINUTES = 30;
+$n = db()->exec("UPDATE conversations SET status = 'closed' WHERE status = 'open' AND last_at < UTC_TIMESTAMP() - INTERVAL " . CHAT_IDLE_MINUTES . " MINUTE");
+if ($n) echo "closed idle chats: $n\n";
 mail_jobs();
 
 /**
@@ -81,7 +86,7 @@ function mail_jobs(): void {
     // 4. Transcripts of finished chats.
     foreach (db()->query("SELECT c.* FROM conversations c JOIN tenants t ON t.id = c.tenant_id
         WHERE c.emailed_at IS NULL AND t.email_transcripts = 1 AND t.status = 'active' AND c.last_at > UTC_TIMESTAMP() - INTERVAL 1 DAY
-          AND (c.status = 'closed' OR c.last_at < UTC_TIMESTAMP() - INTERVAL 30 MINUTE)
+          AND c.status = 'closed'
           AND EXISTS (SELECT 1 FROM messages m WHERE m.conv_id = c.id AND m.role = 'visitor') LIMIT 30")->fetchAll() as $c) {
         $t = $tenant((int)$c['tenant_id']);
         [$sub, $txt, $html] = tr_build($t, $c, tr_messages((int)$c['id']), false, "Chat transcript: {$c['name']}" . ($c['topic'] ? " ({$c['topic']})" : ''));

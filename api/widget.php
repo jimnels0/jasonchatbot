@@ -7,6 +7,10 @@
 //   POST ?a=human&c=ID&t=TOKEN                          -> visitor asks for a person (live if someone is online, else a message)
 //   POST ?a=email&c=ID&t=TOKEN {email, send}            -> save the visitor's email; send=1 also emails them this chat
 //   POST ?a=upload&c=ID&t=TOKEN  multipart file=...     -> visitor sends a file (picture, PDF, Word, Excel, text; 10 MB)
+//   POST ?a=end&c=ID&t=TOKEN                            -> visitor closed the chat (X or New chat): closed, transcript emailed
+//   POST ?a=history&k=KEY {v, exclude}                  -> this browser's earlier chats with the company (last 3, 90 days)
+// A closed chat (idle 30 min, ended by the visitor or by the team) refuses say/human/upload with 409 chat_closed and the
+// widget starts a new chat. poll still answers, so a late team reply still shows up.
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
@@ -18,6 +22,14 @@ api_headers('GET, POST, OPTIONS');
 
 const W_NEW_CHATS_PER_IP_HOUR = 20;
 const W_MSGS_PER_IP_HOUR = 60;
+const W_HISTORY_CHATS = 3;
+
+/** sha256 of the widget's random per-browser key, or '' if it is not a 32-hex key. The key lets a browser read its own past chats. */
+function w_vhash(mixed $v): string { return is_string($v) && preg_match('/^[a-f0-9]{32}$/', $v) ? hash('sha256', $v) : ''; }
+
+function w_open(array $c, bool $es): void {
+    if ($c['status'] === 'closed') fail(409, $es ? 'Este chat terminó. Escriba para iniciar uno nuevo.' : 'This chat has ended. Type to start a new one.', ['code' => 'chat_closed']);
+}
 
 $a = (string)($_GET['a'] ?? '');
 $es = req_lang() === 'es';
@@ -85,21 +97,22 @@ if ($a === 'start') {
     if (!rate_ok("start:{$t['id']}:$ip", W_NEW_CHATS_PER_IP_HOUR, 3600)) fail(429, $es ? 'Demasiados chats. Inténtelo más tarde.' : 'Too many chats from here. Please try again later.');
     [$city, $region, $country] = geo($ip);
     $token = rand_key(16);
-    db()->prepare("INSERT INTO conversations (tenant_id, token, name, email, department, city, region, country, ip, page, lang, user_agent, created_at, last_at, visitor_seen_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())")
+    db()->prepare("INSERT INTO conversations (tenant_id, token, name, email, department, city, region, country, ip, page, lang, user_agent, visitor_hash, created_at, last_at, visitor_seen_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())")
         ->execute([$t['id'], $token, $name, $email, $dept, $city, $region, $country, $ip, mb_substr(str_in($b, 'page', 500), 0, 500), req_lang(),
-                   mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255)]);
+                   mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255), w_vhash($b['v'] ?? null)]);
     out(['conv' => (int)db()->lastInsertId(), 'token' => $token, 'name' => $name]);
 }
 
 if ($a === 'say') {
     $c = w_conv();
+    w_open($c, $es);
     $text = mb_substr(trim((string)(body()['text'] ?? '')), 0, 1000);
     if ($text === '') fail(400, $es ? 'Escriba su pregunta.' : 'Please type a question.');
     if (!rate_ok('say:' . client_ip(), W_MSGS_PER_IP_HOUR, 3600)) fail(429, $es ? 'Demasiados mensajes. Inténtelo más tarde.' : 'Too many messages. Please try again later.');
     db()->prepare("INSERT INTO messages (conv_id, tenant_id, role, body, created_at) VALUES (?,?, 'visitor', ?, UTC_TIMESTAMP())")->execute([$c['id'], $c['tenant_id'], $text]);
     $vid = (int)db()->lastInsertId();
-    db()->prepare("UPDATE conversations SET unread = 1, status = 'open', emailed_at = NULL, last_at = UTC_TIMESTAMP(), visitor_seen_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$c['id']]);
+    db()->prepare("UPDATE conversations SET unread = 1, emailed_at = NULL, last_at = UTC_TIMESTAMP(), visitor_seen_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$c['id']]);
     // A person has the chat, or the visitor asked for one: the bot stays quiet and the team answers.
     if ($c['mode'] === 'human' || $c['handoff_at']) out(['id' => $vid, 'reply' => null, 'mode' => 'human']);
 
@@ -126,11 +139,12 @@ if ($a === 'poll') {
     $rows = array_map(fn($m) => ['id' => (int)$m['id'], 'role' => $m['role'], 'body' => $m['body'], 'agent' => $m['agent_name'], 'file_id' => $m['file_id'],
                                  'sources' => $m['sources'] ? json_decode($m['sources'], true) : []], $st->fetchAll());
     if ($rows) db()->prepare("UPDATE messages SET delivered = 1 WHERE conv_id = ? AND role = 'agent' AND id <= ?")->execute([$c['id'], end($rows)['id']]);   // seen here: no email copy needed
-    out(['messages' => chat_attach_files($rows), 'mode' => $c['mode'], 'handoff' => (bool)$c['handoff']]);
+    out(['messages' => chat_attach_files($rows), 'mode' => $c['mode'], 'handoff' => (bool)$c['handoff'], 'closed' => $c['status'] === 'closed']);
 }
 
 if ($a === 'human') {
     $c = w_conv();
+    w_open($c, $es);
     $st = db()->prepare("SELECT live_chat FROM tenants WHERE id = ?");
     $st->execute([$c['tenant_id']]);
     $online = (int)$st->fetchColumn() === 1 && w_agents_online((int)$c['tenant_id']);
@@ -161,14 +175,43 @@ if ($a === 'email') {
 
 if ($a === 'upload') {
     $c = w_conv();
+    w_open($c, $es);
     if (!rate_ok('upload:' . client_ip(), 20, 3600)) fail(429, $es ? 'Demasiados archivos. Inténtelo más tarde.' : 'Too many files. Please try again later.');
     if (empty($_FILES['file'])) fail(400, $es ? 'Elija un archivo.' : 'Choose a file.');
     $f = chat_file_save($_FILES['file'], (int)$c['tenant_id'], (int)$c['id']);
     db()->prepare("INSERT INTO messages (conv_id, tenant_id, role, body, file_id, created_at) VALUES (?,?, 'visitor', ?, ?, UTC_TIMESTAMP())")
         ->execute([$c['id'], $c['tenant_id'], '📎 ' . $f['name'], $f['id']]);
     $mid = (int)db()->lastInsertId();
-    db()->prepare("UPDATE conversations SET unread = 1, status = 'open', emailed_at = NULL, last_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$c['id']]);
+    db()->prepare("UPDATE conversations SET unread = 1, emailed_at = NULL, last_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$c['id']]);
     out(['id' => $mid, 'file' => $f]);
+}
+
+if ($a === 'end') {
+    $c = w_conv();
+    // Closed until the visitor starts a new one. The worker emails the transcript (status closed) to the company.
+    db()->prepare("UPDATE conversations SET status = 'closed' WHERE id = ? AND status = 'open'")->execute([$c['id']]);
+    out(['ok' => true]);
+}
+
+if ($a === 'history') {
+    $t = w_tenant_by_key((string)($_GET['k'] ?? ''));
+    w_check_site($t);
+    $b = body();
+    $vh = w_vhash($b['v'] ?? null);
+    if ($vh === '') out(['chats' => []]);
+    if (!rate_ok('hist:' . client_ip(), 120, 3600)) fail(429, $es ? 'Demasiadas solicitudes.' : 'Too many requests.');
+    // shortcut: no (tenant_id, visitor_hash) index; the tenant_id index is enough at beta volume. Add one if chats grow large.
+    $st = db()->prepare("SELECT id, created_at FROM conversations WHERE tenant_id = ? AND visitor_hash = ? AND id <> ? AND created_at > UTC_TIMESTAMP() - INTERVAL 90 DAY
+                         AND EXISTS (SELECT 1 FROM messages m WHERE m.conv_id = conversations.id AND m.role = 'visitor') ORDER BY id DESC LIMIT " . W_HISTORY_CHATS);
+    $st->execute([$t['id'], $vh, (int)($b['exclude'] ?? 0)]);
+    $chats = [];
+    foreach (array_reverse($st->fetchAll()) as $cv) {
+        $m = db()->prepare("SELECT * FROM (SELECT id, role, body, agent_name, file_id FROM messages WHERE conv_id = ? AND role IN ('visitor','bot','agent') ORDER BY id DESC LIMIT 60) x ORDER BY id");
+        $m->execute([$cv['id']]);
+        $rows = array_map(fn($r) => ['id' => (int)$r['id'], 'role' => $r['role'], 'body' => $r['body'], 'agent' => $r['agent_name'], 'file_id' => $r['file_id']], $m->fetchAll());
+        $chats[] = ['started' => $cv['created_at'], 'messages' => chat_attach_files($rows)];
+    }
+    out(['chats' => $chats]);
 }
 
 fail(400, 'Unknown action.');
