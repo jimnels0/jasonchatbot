@@ -124,7 +124,7 @@ const Chats: React.FC<{ user: User; openId: number }> = ({ user, openId }) => {
                   <div key={m.id} className={`max-w-[85%] ${mine ? '' : 'ml-auto'}`}>
                     <div className={`rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${mine ? 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700' : m.role === 'agent' ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}`}>
                       {m.file ? <a className="underline" href={m.file.url} target="_blank" rel="noreferrer noopener">📎 {m.file.name} <span className="opacity-70 text-xs">({Math.max(1, Math.round(m.file.size / 1024))} KB)</span>
-                        {m.file.mime.startsWith('image/') && <img src={m.file.url} alt={m.file.name} loading="lazy" className="mt-1 max-h-48 rounded-lg" />}</a> : m.body}</div>
+                        {m.file.mime.startsWith('image/') && <img src={m.file.url} alt={m.file.name} onLoad={() => endRef.current?.scrollIntoView({ block: 'end' })} className="mt-1 max-h-48 rounded-lg" />}</a> : m.body}</div>
                     {m.sources?.length > 0 && <p className="text-[11px] text-slate-500 mt-0.5">{t('chats.sources')}: {m.sources.map((s, i) => <a key={i} className="underline mr-1" href={s.url} target="_blank" rel="noreferrer noopener">{s.title || s.url}</a>)}</p>}
                     <p className={`text-[10px] text-slate-400 mt-0.5 ${mine ? '' : 'text-right'}`}>
                       {m.role === 'agent' ? m.agent_name : t(`chats.role.${m.role}` as 'chats.role.bot')} · {when(m.created_at, lang)}

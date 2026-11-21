@@ -116,7 +116,7 @@
       var b = el('div', 'q ' + (role === 'user' ? 'u' : role === 'agent' ? 'g' : 'a'), file ? null : text);
       if (file) {   // a file: link (and a small picture for images). The URL comes from our server, never from page text.
         var a = el('a', '', '📎 ' + file.name); a.href = file.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; b.append(a);
-        if (/^image\//.test(file.mime || '')) { var im = el('img'); im.src = file.url; im.alt = file.name; im.loading = 'lazy'; b.append(im); }
+        if (/^image\//.test(file.mime || '')) { var im = el('img'); im.alt = file.name; im.onload = function () { log.scrollTop = log.scrollHeight; }; im.src = file.url; b.append(im); }   // scroll again once the picture has its real height
       }
       log.append(b);
       if (sources && sources.length) {
