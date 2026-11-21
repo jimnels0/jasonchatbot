@@ -36,7 +36,7 @@ function auth_user(): ?array {
 }
 
 function require_user(): array { $u = auth_user(); if (!$u) fail(401, 'Please sign in again.', ['code' => 'auth_required']); return $u; }
-function require_owner(): array { $u = require_user(); if ($u['role'] !== 'owner') fail(403, 'Only the account owner can do that.'); return $u; }
+function require_owner(): array { $u = require_user(); if ($u['role'] !== 'owner') fail(403, 'Only an admin can do that.'); return $u; }
 function require_platform_admin(): array { $u = require_user(); if (!$u['is_platform_admin']) fail(403, 'Not allowed.'); return $u; }
 
 function auth_logout(): void { $t = auth_token(); if ($t !== '') db()->prepare("DELETE FROM sessions WHERE token_hash = ?")->execute([hash('sha256', $t)]); }

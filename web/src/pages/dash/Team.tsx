@@ -4,13 +4,13 @@ import { useT } from '../../i18n';
 import { titleCase, when } from '../../format';
 import { btn, Card, Copy, Err, input, label, useDialog } from '../../ui';
 
-type Member = { id: number; name: string; email: string; role: 'owner' | 'agent'; status: 'active' | 'disabled'; last_login_at: string | null };
+type Member = { id: number; name: string; email: string; role: 'owner' | 'agent'; primary?: boolean; status: 'active' | 'disabled'; last_login_at: string | null };
 
 const Team: React.FC<{ user: User }> = ({ user }) => {
   const { t, lang } = useT();
   const { confirm } = useDialog();
   const [rows, setRows] = useState<Member[] | null>(null);
-  const [f, setF] = useState({ name: '', email: '' });
+  const [f, setF] = useState({ name: '', email: '', role: 'agent' });
   const [pw, setPw] = useState<{ who: string; pw: string } | null>(null);
   const [err, setErr] = useState('');
   const load = useCallback(() => call<{ rows: Member[] }>('team.php').then(r => setRows(r.rows)).catch(e => setErr(e.message)), []);
@@ -18,10 +18,10 @@ const Team: React.FC<{ user: User }> = ({ user }) => {
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault(); setErr('');
-    try { const r = await call<{ password: string }>('team.php', 'POST', { name: titleCase(f.name), email: f.email }); setPw({ who: f.email, pw: r.password }); setF({ name: '', email: '' }); load(); }
+    try { const r = await call<{ password: string }>('team.php', 'POST', { name: titleCase(f.name), email: f.email, role: f.role }); setPw({ who: f.email, pw: r.password }); setF({ name: '', email: '', role: 'agent' }); load(); }
     catch (x) { setErr((x as Error).message); }
   };
-  const act = async (m: Member, a: 'reset' | 'toggle' | 'remove') => {
+  const act = async (m: Member, a: 'reset' | 'toggle' | 'role' | 'remove') => {
     setErr('');
     try {
       if (a === 'remove') {
@@ -49,10 +49,11 @@ const Team: React.FC<{ user: User }> = ({ user }) => {
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">{rows.map(m => (
             <li key={m.id} className="py-2.5 flex items-center gap-3 flex-wrap">
               <div className="flex-1 min-w-[12rem]">
-                <p className="font-semibold text-sm">{m.name} <span className="text-xs text-slate-400">· {m.role === 'owner' ? t('team.owner') : t('team.agent')}{m.status === 'disabled' ? ` · ${t('team.disabled')}` : ''}</span></p>
+                <p className="font-semibold text-sm">{m.name} <span className="text-xs text-slate-400">· {m.primary ? t('team.owner') : m.role === 'owner' ? t('team.admin') : t('team.agent')}{m.status === 'disabled' ? ` · ${t('team.disabled')}` : ''}</span></p>
                 <p className="text-xs text-slate-500">{m.email} · {t('team.last')}: {when(m.last_login_at, lang)}</p>
               </div>
-              {m.role !== 'owner' && m.id !== user.id && <div className="flex gap-1">
+              {!m.primary && m.id !== user.id && <div className="flex gap-1 flex-wrap">
+                <button className={btn.small} onClick={() => act(m, 'role')}>{m.role === 'owner' ? t('team.toAgent') : t('team.toAdmin')}</button>
                 <button className={btn.small} onClick={() => act(m, 'reset')}>{t('team.reset')}</button>
                 <button className={btn.small} onClick={() => act(m, 'toggle')}>{m.status === 'active' ? t('team.off') : t('team.on')}</button>
                 <button className={`${btn.small} text-red-600 border-red-300`} onClick={() => act(m, 'remove')}>{t('common.delete')}</button>
@@ -63,6 +64,11 @@ const Team: React.FC<{ user: User }> = ({ user }) => {
         <form onSubmit={add} className="space-y-3">
           <div><label className={label} htmlFor="tn">{t('team.name')}</label><input id="tn" className={input} value={f.name} onChange={e => setF({ ...f, name: e.target.value })} onBlur={() => setF(v => ({ ...v, name: titleCase(v.name) }))} required maxLength={100} /></div>
           <div><label className={label} htmlFor="te">{t('team.email')}</label><input id="te" type="email" className={input} value={f.email} onChange={e => setF({ ...f, email: e.target.value })} required maxLength={190} /></div>
+          <div><label className={label} htmlFor="tr">{t('team.role')}</label>
+            <select id="tr" className={input} value={f.role} onChange={e => setF({ ...f, role: e.target.value })}>
+              <option value="agent">{t('team.agent')} — {t('team.agentHint')}</option>
+              <option value="admin">{t('team.admin')} — {t('team.adminHint')}</option>
+            </select></div>
           <button className={btn.primary}>{t('team.add')}</button>
         </form>
       </Card>

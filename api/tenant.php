@@ -22,7 +22,7 @@ function tenant_row(int $tid): array {
 }
 
 if (method() === 'GET') out(['tenant' => tenant_row($tid)]);
-if ($u['role'] !== 'owner') fail(403, 'Only the account owner can change settings.');
+if ($u['role'] !== 'owner') fail(403, 'Only an admin can change settings.');
 
 if (method() === 'POST' && ($_GET['a'] ?? '') === 'newkey') {
     db()->prepare("UPDATE tenants SET public_key = ? WHERE id = ?")->execute([rand_key(12), $tid]);

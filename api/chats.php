@@ -110,7 +110,7 @@ if (method() === 'POST') {
 }
 
 if (method() === 'DELETE') {
-    if ($u['role'] !== 'owner') fail(403, 'Only the account owner can delete chats.');
+    if ($u['role'] !== 'owner') fail(403, 'Only an admin can delete chats.');
     $c = chat_of($tid);
     $st = db()->prepare("SELECT path FROM files WHERE conv_id = ?");
     $st->execute([$c['id']]);
