@@ -14,12 +14,14 @@
       send: 'Send', typing: 'Typing…', human: 'Talk to a person', newChat: 'New chat', close: 'Close', err: 'Something went wrong. Please try again.',
       saved: 'This chat is saved so our team can help you.', sources: 'Source', waiting: 'A person will reply here.', hi: 'Hi ', help: '! How can we help?',
       powered: 'AI assistant. Answers can be wrong; ask for a person anytime.', online: 'Team online', offline: 'Leave a message',
-      attach: 'Send a file', mailMe: 'Email me this chat', yourEmail: 'Your email', save: 'Save', sending: 'Sending…' },
+      attach: 'Send a file', mailMe: 'Email me this chat', yourEmail: 'Your email', save: 'Save', sending: 'Sending…',
+      modeAi: '🤖 AI assistant', modeLive: '👤 Live person', modeWait: 'Waiting for a person…', modeOn: 'Connected to ', modeMsg: '👤 Leave a message' },
     es: { chat: 'Chatee con nosotros', name: 'Su nombre', email: 'Correo (opcional)', dept: '¿Sobre qué es?', start: 'Iniciar chat', ask: 'Escriba su mensaje…',
       send: 'Enviar', typing: 'Escribiendo…', human: 'Hablar con una persona', newChat: 'Nuevo chat', close: 'Cerrar', err: 'Algo salió mal. Inténtelo de nuevo.',
       saved: 'Guardamos este chat para que nuestro equipo pueda ayudarle.', sources: 'Fuente', waiting: 'Una persona le responderá aquí.', hi: '¡Hola ', help: '! ¿En qué le podemos ayudar?',
       powered: 'Asistente de IA. Las respuestas pueden tener errores; pida una persona cuando quiera.', online: 'Equipo en línea', offline: 'Dejar un mensaje',
-      attach: 'Enviar un archivo', mailMe: 'Enviarme este chat por correo', yourEmail: 'Su correo', save: 'Guardar', sending: 'Enviando…' }
+      attach: 'Enviar un archivo', mailMe: 'Enviarme este chat por correo', yourEmail: 'Su correo', save: 'Guardar', sending: 'Enviando…',
+      modeAi: '🤖 Asistente de IA', modeLive: '👤 Persona en vivo', modeWait: 'Esperando a una persona…', modeOn: 'Conectado con ', modeMsg: '👤 Dejar un mensaje' }
   }[lang];
   var STORE = 'jcb_chat_' + KEY;
   var get = function () { try { return JSON.parse(sessionStorage.getItem(STORE) || 'null'); } catch (e) { return null; } };
@@ -67,7 +69,11 @@
       + '.fr{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;align-items:center}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}'
       + '.pc{background:#f3f4f6;border:1px solid #d1d5db;border-radius:10px;padding:0 10px;cursor:pointer;font-size:16px;color:#374151}'
       + '.q a{color:inherit;text-decoration:underline;word-break:break-all}.q img{display:block;max-width:200px;max-height:160px;border-radius:8px;margin-top:4px}'
-      + '.em{display:flex;gap:6px;margin:0 0 10px}';
+      + '.em{display:flex;gap:6px;margin:0 0 10px}'
+      + '.md{display:flex;gap:4px;padding:6px;background:#fff;border-bottom:1px solid #e5e7eb}'
+      + '.md button{flex:1;border:1px solid #d1d5db;background:#f9fafb;color:#374151;border-radius:999px;padding:6px 8px;font-size:12px;font-weight:700;cursor:pointer}'
+      + '.md button[aria-pressed=true]{background:' + c + ';border-color:' + c + ';color:#fff}'
+      + '.ms{font-size:11px;color:#6b7280;text-align:center;padding:3px 8px;background:#fff;border-bottom:1px solid #e5e7eb}';
     root.appendChild(css);
     var bubble = el('button', 'b', '💬'); bubble.setAttribute('aria-label', S.chat);
     var panel = el('div', 'p'); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', cfg.company);
@@ -82,17 +88,28 @@
     fileIn.accept = 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv';
     form.append(clip, box, send, fileIn);
     var foot = el('div', 't'); var row = el('div', 'fr');
-    var humanBtn = el('button', 'hm'); var mailBtn = el('button', 'hm', S.mailMe);
+    var mailBtn = el('button', 'hm', S.mailMe);
+    // Two-way switch under the header: AI assistant (default) or Live person.
+    var modeBar = el('div', 'md'); modeBar.setAttribute('role', 'group');
+    var aiBtn = el('button', '', S.modeAi); aiBtn.type = 'button';
+    var humanBtn = el('button'); humanBtn.type = 'button';
+    modeBar.append(aiBtn, humanBtn);
+    var modeNote = el('div', 'ms');
     function liveLabel() {
+      var live = !!(chat && chat.toldWaiting);
       humanBtn.textContent = '';
       var d = el('span', 'dot'); d.style.background = cfg.online ? '#10b981' : '#9ca3af';
-      humanBtn.append(d, (cfg.online ? S.human : S.offline));
+      humanBtn.append(d, (cfg.online ? S.modeLive : S.modeMsg));
       humanBtn.title = cfg.online ? S.online : S.offline;
+      aiBtn.setAttribute('aria-pressed', live ? 'false' : 'true');
+      humanBtn.setAttribute('aria-pressed', live ? 'true' : 'false');
+      aiBtn.disabled = live;   // once a person is asked for, the bot stays quiet for this chat; "New chat" starts with the AI again
+      modeNote.textContent = live ? (chat.agent ? S.modeOn + chat.agent : S.modeWait) : S.powered;
     }
-    liveLabel();
-    if (cfg.live_chat === false) humanBtn.style.display = 'none';
-    row.append(humanBtn, mailBtn); foot.append(row, el('div', '', S.powered));
-    panel.append(head, log, form, foot); root.append(bubble, panel);
+    function showMode(on) { modeBar.style.display = on && cfg.live_chat !== false ? 'flex' : 'none'; modeNote.style.display = on ? 'block' : 'none'; }
+    row.append(mailBtn); foot.append(row);
+    panel.append(head, modeBar, modeNote, log, form, foot); root.append(bubble, panel);
+    showMode(false);   // shown once the chat has started
 
     function line(role, text, sources, file) {
       if (role === 'system') { var n = el('p', 'n', text); log.append(n); log.scrollTop = log.scrollHeight; return n; }
@@ -125,7 +142,7 @@
     }
 
     function intro() {
-      stopPoll(); log.textContent = ''; form.style.display = 'none'; foot.style.display = 'none'; newBtn.style.display = 'none';
+      stopPoll(); log.textContent = ''; form.style.display = 'none'; foot.style.display = 'none'; newBtn.style.display = 'none'; showMode(false);
       var f = el('form', 'i');
       f.append(el('p', '', cfg.greeting || S.chat));
       var nm = el('input'); nm.placeholder = S.name; nm.required = true; nm.maxLength = 80; nm.autocomplete = 'name'; nm.setAttribute('aria-label', S.name);
@@ -150,7 +167,7 @@
     }
 
     function talk() {
-      log.textContent = ''; form.style.display = 'flex'; foot.style.display = 'block'; newBtn.style.display = '';
+      log.textContent = ''; form.style.display = 'flex'; foot.style.display = 'block'; newBtn.style.display = ''; liveLabel(); showMode(true);
       line('bot', S.hi + chat.name + S.help);
       chat.log.forEach(function (m) { line(m.role, m.body, m.sources, m.file); });
       box.focus(); startPoll();
@@ -164,6 +181,7 @@
           if (m.id <= (chat.last || 0)) return;
           var role = m.role === 'agent' ? 'agent' : m.role === 'system' ? 'system' : 'bot';
           line(role, m.body, m.sources, m.file); remember(role, m.body, m.sources, m.id, m.file);
+          if (role === 'agent') { chat.toldWaiting = true; if (m.agent) chat.agent = m.agent; put(chat); liveLabel(); }
         });
       }).catch(function (x) { if (x.code === 'chat_ended') { put(null); chat = null; intro(); } });
     }
@@ -177,7 +195,7 @@
       line('user', q); remember('user', q);
       var wait = line('bot', S.typing);
       req('POST', 'a=say&c=' + chat.conv + '&t=' + chat.token, { text: q }).then(function (j) {
-        if (j.reply === null) { wait.remove(); if (!chat.toldWaiting) { line('system', S.waiting); chat.toldWaiting = true; put(chat); } return; }
+        if (j.reply === null) { wait.remove(); if (!chat.toldWaiting) { line('system', S.waiting); chat.toldWaiting = true; put(chat); liveLabel(); } return; }
         wait.remove(); line('bot', j.reply, j.sources); remember('bot', j.reply, j.sources, j.id);
       }).catch(function (x) {
         wait.textContent = x.message;
@@ -188,7 +206,7 @@
       if (!chat) return;
       humanBtn.disabled = true;
       req('POST', 'a=human&c=' + chat.conv + '&t=' + chat.token).then(function (j) {
-        line('system', j.reply); remember('system', j.reply, null, j.id); chat.toldWaiting = true; put(chat);
+        line('system', j.reply); remember('system', j.reply, null, j.id); chat.toldWaiting = true; put(chat); liveLabel();
         if (!j.online && j.need_email) askEmail(false);
       })
         .catch(function (x) { line('system', x.message); }).then(function () { humanBtn.disabled = false; });

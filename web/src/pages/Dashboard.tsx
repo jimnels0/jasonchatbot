@@ -43,6 +43,22 @@ function ring() {
 const SOUND_KEY = 'jcb_sound';
 const RING_REPEAT_MS = 30000;   // ring again every 30 s while someone is still waiting
 function readSound(): boolean { try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; } }
+
+/** Browser-tab icon: a chat bubble, with a red badge and the count while visitors wait for a person. */
+function setTabIcon(count: number) {
+  try {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+    const g = cv.getContext('2d'); if (!g) return;
+    g.font = '48px serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('💬', 30, 36);
+    if (count > 0) {
+      g.fillStyle = '#dc2626'; g.beginPath(); g.arc(46, 18, 18, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#fff'; g.font = 'bold 26px sans-serif'; g.fillText(count > 9 ? '9+' : String(count), 46, 19);
+    }
+    let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+    link.href = cv.toDataURL('image/png');
+  } catch { /* no canvas */ }
+}
 type Tab = typeof OWNER_TABS[number];
 
 const Dashboard: React.FC<{ user: User; route: string; onSignOut: () => void }> = ({ user, route, onSignOut }) => {
@@ -82,10 +98,19 @@ const Dashboard: React.FC<{ user: User; route: string; onSignOut: () => void }> 
             n.onclick = () => { window.focus(); location.hash = `/app/chats/${w.id}`; n.close(); }; });
         }
       }
-      document.title = (r.waiting.length ? `(${r.waiting.length}) ` : '') + APP_NAME;
     }).catch(() => {});
     f(); const id = setInterval(f, 10000); return () => clearInterval(id);
   }, [t]);
+  // Browser tab: red badge on the icon, and the title blinks "🔴 N waiting" while anyone waits for a person.
+  useEffect(() => {
+    setTabIcon(waiting);
+    if (!waiting) { document.title = APP_NAME; return; }
+    let on = false;
+    const blink = () => { on = !on; document.title = on ? `🔴 ${waiting} ${t('tab.waiting')}` : `(${waiting}) ${APP_NAME}`; };
+    blink(); const id = setInterval(blink, 1000);
+    return () => { clearInterval(id); document.title = APP_NAME; };
+  }, [waiting, t]);
+  useEffect(() => () => setTabIcon(0), []);
   const toggleAvailable = () => call<{ available: boolean }>('live.php', 'POST', { available: !available }).then(r => setAvailable(r.available)).catch(() => {});
   const askAlerts = () => { if (typeof Notification !== 'undefined') Notification.requestPermission().then(setPerm); unlockAudio(); };
   const toggleSound = () => {
