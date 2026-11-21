@@ -7,9 +7,11 @@ Product name is NOT decided: the placeholder "Jason Chatbot" lives in one consta
 - LIVE on the temp domain, tested end to end: sign-up, knowledge (text + site crawl), approved answers (sent word for
   word, no AI call, when the question overlaps >= 60%), widget in a real browser, inbox with name/location/department,
   allowed-sites block (403 with a clear message), private files 404.
-- **AI answers are OFF until keys are added:** James runs `ssh -t jcb "bash ~/setai.sh"` (prompts, hidden input,
-  tests each key). Until then every non-approved question hands off to a person. Copying Penny's keys across servers
-  from Claude's tools was refused by the permission system, so keys only come in through that script.
+- **AI keys (2026-11-20):** Groq and Cerebras keys were copied from Penny dev's server (James approved; piped
+  server to server, never printed) into `/home/jcbot/jcb-config.php`; both tested OK, and a real chat answered via
+  groq/openai/gpt-oss-120b (EN + ES, out-of-knowledge question handed off). They are SHARED with Penny (same usage and
+  limits); give the chatbot its own keys before selling it. To change keys: `ssh -t jcb "bash ~/setai.sh"` (prompts,
+  hidden input, tests each key). No Anthropic/OpenAI key yet.
 - Demo company: "Penny Bid Deals" (owner demo@pennybiddeals.com), knowledge = Penny's `assistant_knowledge.php` text
   plus the site crawl. Its key is `$demo_tenant_key` in jcb-config.php, which puts its bubble on the landing page.
 - **JavaScript-built sites** (Penny itself is one) give the crawler almost no text. The crawler now skips pages under
