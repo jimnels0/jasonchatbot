@@ -44,7 +44,7 @@ const SCHEMA = [
 "CREATE TABLE IF NOT EXISTS sources (
   id INT AUTO_INCREMENT PRIMARY KEY,
   tenant_id INT NOT NULL,
-  kind ENUM('site','url','text','pdf') NOT NULL,
+  kind ENUM('site','url','text','pdf','doc') NOT NULL,
   title VARCHAR(255) NOT NULL DEFAULT '',
   url VARCHAR(1000) NOT NULL DEFAULT '',
   file VARCHAR(255) NOT NULL DEFAULT '',
@@ -132,6 +132,18 @@ const SCHEMA = [
   at DATETIME NOT NULL,
   INDEX (k, at)
 ) ENGINE=InnoDB",
+"CREATE TABLE IF NOT EXISTS files (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id INT NOT NULL,
+  conv_id INT NOT NULL,
+  dl_key CHAR(32) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  mime VARCHAR(100) NOT NULL,
+  size INT NOT NULL,
+  path VARCHAR(100) NOT NULL,
+  created_at DATETIME NOT NULL,
+  INDEX (conv_id), INDEX (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 "CREATE TABLE IF NOT EXISTS visits (
   id INT AUTO_INCREMENT PRIMARY KEY,
   kind VARCHAR(20) NOT NULL,
@@ -142,4 +154,22 @@ const SCHEMA = [
   created_at DATETIME NOT NULL,
   INDEX (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+];
+
+// Columns added after v0.1. CREATE TABLE IF NOT EXISTS never adds columns, so migrate.php adds any missing one from here.
+const UPGRADES = [
+  ['users', 'seen_at', 'DATETIME NULL'],                                  // last dashboard heartbeat (presence)
+  ['users', 'available', 'TINYINT NOT NULL DEFAULT 1'],                   // agent's own "I can take live chats" switch
+  ['tenants', 'live_chat', 'TINYINT NOT NULL DEFAULT 1'],                 // offer "Talk to a person" at all
+  ['tenants', 'notify_emails', "VARCHAR(600) NOT NULL DEFAULT ''"],       // alert + transcript addresses ('' = the owner)
+  ['tenants', 'email_transcripts', 'TINYINT NOT NULL DEFAULT 1'],         // email every finished chat
+  ['tenants', 'email_alerts', 'TINYINT NOT NULL DEFAULT 1'],              // email when a visitor asks for a person
+  ['conversations', 'visitor_seen_at', 'DATETIME NULL'],                 // widget heartbeat while the chat panel is open
+  ['conversations', 'handoff_at', 'DATETIME NULL'],
+  ['conversations', 'alerted_at', 'DATETIME NULL'],
+  ['conversations', 'emailed_at', 'DATETIME NULL'],
+  ['conversations', 'visitor_mail_at', 'DATETIME NULL'],                 // visitor asked "email me this chat" (pending until sent)
+  ['conversations', 'user_agent', "VARCHAR(255) NOT NULL DEFAULT ''"],
+  ['messages', 'file_id', 'INT NULL'],
+  ['messages', 'delivered', 'TINYINT NOT NULL DEFAULT 0'],               // agent message seen by the widget (else emailed)
 ];

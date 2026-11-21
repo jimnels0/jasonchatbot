@@ -13,20 +13,23 @@
     en: { chat: 'Chat with us', name: 'Your name', email: 'Email (optional)', dept: 'What is this about?', start: 'Start chat', ask: 'Type your message…',
       send: 'Send', typing: 'Typing…', human: 'Talk to a person', newChat: 'New chat', close: 'Close', err: 'Something went wrong. Please try again.',
       saved: 'This chat is saved so our team can help you.', sources: 'Source', waiting: 'A person will reply here.', hi: 'Hi ', help: '! How can we help?',
-      powered: 'AI assistant. Answers can be wrong; ask for a person anytime.' },
+      powered: 'AI assistant. Answers can be wrong; ask for a person anytime.', online: 'Team online', offline: 'Leave a message',
+      attach: 'Send a file', mailMe: 'Email me this chat', yourEmail: 'Your email', save: 'Save', sending: 'Sending…' },
     es: { chat: 'Chatee con nosotros', name: 'Su nombre', email: 'Correo (opcional)', dept: '¿Sobre qué es?', start: 'Iniciar chat', ask: 'Escriba su mensaje…',
       send: 'Enviar', typing: 'Escribiendo…', human: 'Hablar con una persona', newChat: 'Nuevo chat', close: 'Cerrar', err: 'Algo salió mal. Inténtelo de nuevo.',
       saved: 'Guardamos este chat para que nuestro equipo pueda ayudarle.', sources: 'Fuente', waiting: 'Una persona le responderá aquí.', hi: '¡Hola ', help: '! ¿En qué le podemos ayudar?',
-      powered: 'Asistente de IA. Las respuestas pueden tener errores; pida una persona cuando quiera.' }
+      powered: 'Asistente de IA. Las respuestas pueden tener errores; pida una persona cuando quiera.', online: 'Equipo en línea', offline: 'Dejar un mensaje',
+      attach: 'Enviar un archivo', mailMe: 'Enviarme este chat por correo', yourEmail: 'Su correo', save: 'Guardar', sending: 'Enviando…' }
   }[lang];
   var STORE = 'jcb_chat_' + KEY;
   var get = function () { try { return JSON.parse(sessionStorage.getItem(STORE) || 'null'); } catch (e) { return null; } };
   var put = function (v) { try { v ? sessionStorage.setItem(STORE, JSON.stringify(v)) : sessionStorage.removeItem(STORE); } catch (e) {} };
-  var chat = get();   // {conv, token, name, last, log:[{role, body, sources}]}
+  var chat = get();   // {conv, token, name, email, last, log:[{role, body, sources, file}]}
   var cfg = null, pollTimer = null;
 
   function req(method, q, body) {
-    return fetch(API + '?' + q + '&lang=' + lang, { method: method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })
+    var form = typeof FormData !== 'undefined' && body instanceof FormData;
+    return fetch(API + '?' + q + '&lang=' + lang, { method: method, headers: body && !form ? { 'Content-Type': 'application/json' } : {}, body: body ? (form ? body : JSON.stringify(body)) : undefined })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.message || S.err); e.code = j.code; throw e; } return j; }); });
   }
   function titleCase(s) {
@@ -60,7 +63,11 @@
       + 'input,select,textarea{border:1px solid #d1d5db;border-radius:10px;padding:9px;font-size:14px;width:100%;background:#fff;color:#111827}'
       + 'button.k{border:0;border-radius:10px;padding:9px 13px;font-weight:700;cursor:pointer;color:#fff;background:' + c + '}button:disabled{opacity:.5}'
       + '.i{display:flex;flex-direction:column;gap:8px}.e{color:#b91c1c;font-size:13px;margin:0}.t{font-size:11px;color:#9ca3af;text-align:center;padding:0 10px 8px;background:#fff}'
-      + '.hm{background:transparent;border:0;color:' + c + ';font-weight:700;cursor:pointer;font-size:12px;padding:4px 0}';
+      + '.hm{background:transparent;border:0;color:' + c + ';font-weight:700;cursor:pointer;font-size:12px;padding:4px 0}'
+      + '.fr{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;align-items:center}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}'
+      + '.pc{background:#f3f4f6;border:1px solid #d1d5db;border-radius:10px;padding:0 10px;cursor:pointer;font-size:16px;color:#374151}'
+      + '.q a{color:inherit;text-decoration:underline;word-break:break-all}.q img{display:block;max-width:200px;max-height:160px;border-radius:8px;margin-top:4px}'
+      + '.em{display:flex;gap:6px;margin:0 0 10px}';
     root.appendChild(css);
     var bubble = el('button', 'b', '💬'); bubble.setAttribute('aria-label', S.chat);
     var panel = el('div', 'p'); panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-label', cfg.company);
@@ -69,13 +76,31 @@
     head.append(title, newBtn, closeBtn);
     var log = el('div', 'm'); log.setAttribute('aria-live', 'polite');
     var form = el('form', 'f'); var box = el('input'); box.placeholder = S.ask; box.maxLength = 1000; box.setAttribute('aria-label', S.ask);
-    var send = el('button', 'k', S.send); form.append(box, send);
-    var foot = el('div', 't'); var humanBtn = el('button', 'hm', S.human); foot.append(humanBtn, el('div', '', S.powered));
+    var send = el('button', 'k', S.send);
+    var clip = el('button', 'pc', '📎'); clip.type = 'button'; clip.title = S.attach; clip.setAttribute('aria-label', S.attach);
+    var fileIn = el('input'); fileIn.type = 'file'; fileIn.style.display = 'none';
+    fileIn.accept = 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv';
+    form.append(clip, box, send, fileIn);
+    var foot = el('div', 't'); var row = el('div', 'fr');
+    var humanBtn = el('button', 'hm'); var mailBtn = el('button', 'hm', S.mailMe);
+    function liveLabel() {
+      humanBtn.textContent = '';
+      var d = el('span', 'dot'); d.style.background = cfg.online ? '#10b981' : '#9ca3af';
+      humanBtn.append(d, (cfg.online ? S.human : S.offline));
+      humanBtn.title = cfg.online ? S.online : S.offline;
+    }
+    liveLabel();
+    if (cfg.live_chat === false) humanBtn.style.display = 'none';
+    row.append(humanBtn, mailBtn); foot.append(row, el('div', '', S.powered));
     panel.append(head, log, form, foot); root.append(bubble, panel);
 
-    function line(role, text, sources) {
+    function line(role, text, sources, file) {
       if (role === 'system') { var n = el('p', 'n', text); log.append(n); log.scrollTop = log.scrollHeight; return n; }
-      var b = el('div', 'q ' + (role === 'user' ? 'u' : role === 'agent' ? 'g' : 'a'), text);
+      var b = el('div', 'q ' + (role === 'user' ? 'u' : role === 'agent' ? 'g' : 'a'), file ? null : text);
+      if (file) {   // a file: link (and a small picture for images). The URL comes from our server, never from page text.
+        var a = el('a', '', '📎 ' + file.name); a.href = file.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; b.append(a);
+        if (/^image\//.test(file.mime || '')) { var im = el('img'); im.src = file.url; im.alt = file.name; im.loading = 'lazy'; b.append(im); }
+      }
       log.append(b);
       if (sources && sources.length) {
         var s = el('div', 's', S.sources + ': ');
@@ -85,7 +110,19 @@
       log.scrollTop = log.scrollHeight;
       return b;
     }
-    function remember(role, body, sources, id) { chat.log.push({ role: role, body: body, sources: sources || [] }); if (id) chat.last = Math.max(chat.last || 0, id); put(chat); }
+    function remember(role, body, sources, id, file) { chat.log.push({ role: role, body: body, sources: sources || [], file: file || null }); if (id) chat.last = Math.max(chat.last || 0, id); put(chat); }
+
+    // Inline "your email" box (offline message, or "email me this chat" without an address).
+    function askEmail(send) {
+      var f = el('form', 'em'); var e = el('input'); e.type = 'email'; e.required = true; e.placeholder = S.yourEmail; e.maxLength = 190; e.setAttribute('aria-label', S.yourEmail);
+      var b = el('button', 'k', S.save); f.append(e, b); log.append(f); log.scrollTop = log.scrollHeight; e.focus();
+      f.addEventListener('submit', function (ev) {
+        ev.preventDefault(); b.disabled = true;
+        req('POST', 'a=email&c=' + chat.conv + '&t=' + chat.token, { email: e.value, send: send ? 1 : 0 })
+          .then(function (j) { chat.email = j.email; put(chat); f.remove(); line('system', j.reply); remember('system', j.reply); })
+          .catch(function (x) { b.disabled = false; line('system', x.message); });
+      });
+    }
 
     function intro() {
       stopPoll(); log.textContent = ''; form.style.display = 'none'; foot.style.display = 'none'; newBtn.style.display = 'none';
@@ -106,7 +143,7 @@
       f.addEventListener('submit', function (e) {
         e.preventDefault(); nm.value = titleCase(nm.value); go.disabled = true; er.textContent = '';
         req('POST', 'a=start&k=' + encodeURIComponent(KEY), { name: nm.value, email: em ? em.value : '', department: dp ? dp.value : (cfg.departments[0] || ''), page: location.href })
-          .then(function (j) { chat = { conv: j.conv, token: j.token, name: j.name, last: 0, log: [] }; put(chat); talk(); })
+          .then(function (j) { chat = { conv: j.conv, token: j.token, name: j.name, email: em ? em.value.trim() : '', last: 0, log: [] }; put(chat); talk(); })
           .catch(function (x) { er.textContent = x.message; go.disabled = false; });
       });
       log.append(f); nm.focus();
@@ -115,7 +152,7 @@
     function talk() {
       log.textContent = ''; form.style.display = 'flex'; foot.style.display = 'block'; newBtn.style.display = '';
       line('bot', S.hi + chat.name + S.help);
-      chat.log.forEach(function (m) { line(m.role, m.body, m.sources); });
+      chat.log.forEach(function (m) { line(m.role, m.body, m.sources, m.file); });
       box.focus(); startPoll();
     }
 
@@ -126,7 +163,7 @@
         j.messages.forEach(function (m) {
           if (m.id <= (chat.last || 0)) return;
           var role = m.role === 'agent' ? 'agent' : m.role === 'system' ? 'system' : 'bot';
-          line(role, m.body, m.sources); remember(role, m.body, m.sources, m.id);
+          line(role, m.body, m.sources, m.file); remember(role, m.body, m.sources, m.id, m.file);
         });
       }).catch(function (x) { if (x.code === 'chat_ended') { put(null); chat = null; intro(); } });
     }
@@ -150,15 +187,38 @@
     humanBtn.addEventListener('click', function () {
       if (!chat) return;
       humanBtn.disabled = true;
-      req('POST', 'a=human&c=' + chat.conv + '&t=' + chat.token).then(function (j) { line('system', j.reply); remember('system', j.reply, null, j.id); })
+      req('POST', 'a=human&c=' + chat.conv + '&t=' + chat.token).then(function (j) {
+        line('system', j.reply); remember('system', j.reply, null, j.id); chat.toldWaiting = true; put(chat);
+        if (!j.online && j.need_email) askEmail(false);
+      })
         .catch(function (x) { line('system', x.message); }).then(function () { humanBtn.disabled = false; });
+    });
+    mailBtn.addEventListener('click', function () {
+      if (!chat) return;
+      if (!chat.email) { askEmail(true); return; }
+      mailBtn.disabled = true;
+      req('POST', 'a=email&c=' + chat.conv + '&t=' + chat.token, { email: chat.email, send: 1 })
+        .then(function (j) { line('system', j.reply); remember('system', j.reply); })
+        .catch(function (x) { line('system', x.message); }).then(function () { mailBtn.disabled = false; });
+    });
+    clip.addEventListener('click', function () { if (chat) fileIn.click(); });
+    fileIn.addEventListener('change', function () {
+      var f = fileIn.files && fileIn.files[0]; fileIn.value = '';
+      if (!f || !chat) return;
+      if (f.size > 10 * 1024 * 1024) { line('system', lang === 'es' ? 'Ese archivo es muy grande (máximo 10 MB).' : 'That file is too big (10 MB maximum).'); return; }
+      var wait = line('system', S.sending); var fd = new FormData(); fd.append('file', f);
+      req('POST', 'a=upload&c=' + chat.conv + '&t=' + chat.token, fd).then(function (j) {
+        wait.remove(); line('user', '', null, j.file); remember('user', '📎 ' + j.file.name, null, null, j.file);
+      }).catch(function (x) { wait.textContent = x.message; });
     });
     newBtn.addEventListener('click', function () { put(null); chat = null; intro(); });
     closeBtn.addEventListener('click', function () { panel.style.display = 'none'; stopPoll(); bubble.focus(); });
     bubble.addEventListener('click', function () {
       var open = panel.style.display === 'flex';
       panel.style.display = open ? 'none' : 'flex';
-      if (open) stopPoll(); else if (chat) talk(); else intro();
+      if (open) { stopPoll(); return; }
+      if (chat) talk(); else intro();
+      req('GET', 'a=config&k=' + encodeURIComponent(KEY)).then(function (c2) { cfg.online = c2.online; cfg.live_chat = c2.live_chat; liveLabel(); }).catch(function () {});
     });
   }
 })();

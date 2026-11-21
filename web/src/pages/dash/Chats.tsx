@@ -6,25 +6,28 @@ import { btn, card, Err, input, useDialog } from '../../ui';
 
 type Row = { id: number; name: string; email: string; department: string; topic: string; city: string; region: string; country: string; lang: string;
   mode: 'bot' | 'human'; handoff: number; unread: number; status: 'open' | 'closed'; page: string; created_at: string; last_at: string; msgs: number; last_msg: string };
-type Msg = { id: number; role: 'visitor' | 'bot' | 'agent' | 'system'; body: string; sources: { title: string; url: string }[]; answered: number; via: string; agent_name: string; created_at: string };
+type Msg = { id: number; role: 'visitor' | 'bot' | 'agent' | 'system'; body: string; sources: { title: string; url: string }[]; answered: number; via: string; agent_name: string; created_at: string;
+  file: { name: string; mime: string; size: number; url: string } | null };
+type Full = { chat: Row & { online?: boolean; user_agent?: string }; messages: Msg[]; mail_ready: boolean };
 const place = (r: Pick<Row, 'city' | 'region' | 'country'>) => [r.city, r.region, r.country].filter(Boolean).join(', ') || '—';
 
 // The inbox: who is talking (name, location, department, topic), the transcript, and a reply box so a person can take over.
 const Chats: React.FC<{ user: User; openId: number }> = ({ user, openId }) => {
   const { t, lang } = useT();
-  const { confirm } = useDialog();
+  const { confirm, toast } = useDialog();
+  const fileRef = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState('all');
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<Row[] | null>(null);
   const [counts, setCounts] = useState({ handoff: 0, unread: 0 });
-  const [chat, setChat] = useState<{ chat: Row; messages: Msg[] } | null>(null);
+  const [chat, setChat] = useState<Full | null>(null);
   const [reply, setReply] = useState('');
   const [err, setErr] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
 
   const loadList = useCallback(() => call<{ rows: Row[]; counts: { handoff: number; unread: number } }>(`chats.php?filter=${filter}&q=${encodeURIComponent(q)}`)
     .then(r => { setRows(r.rows); setCounts(r.counts); }).catch(e => setErr(e.message)), [filter, q]);
-  const loadChat = useCallback((id: number) => id ? call<{ chat: Row; messages: Msg[] }>(`chats.php?id=${id}`).then(setChat).catch(e => setErr(e.message)) : Promise.resolve(setChat(null)), []);
+  const loadChat = useCallback((id: number) => id ? call<Full>(`chats.php?id=${id}`).then(setChat).catch(e => setErr(e.message)) : Promise.resolve(setChat(null)), []);
 
   useEffect(() => { const h = setTimeout(loadList, 250); return () => clearTimeout(h); }, [loadList]);
   useEffect(() => { loadChat(openId); }, [openId, loadChat]);
@@ -37,6 +40,17 @@ const Chats: React.FC<{ user: User; openId: number }> = ({ user, openId }) => {
 
   const act = async (a: string, body?: unknown) => { try { await call(`chats.php?id=${openId}&a=${a}`, 'POST', body); await loadChat(openId); loadList(); } catch (e) { setErr((e as Error).message); } };
   const send = async (e: React.FormEvent) => { e.preventDefault(); if (!reply.trim()) return; await act('reply', { text: reply }); setReply(''); };
+  const upload = async (f: File | undefined) => {
+    if (!f) return;
+    const fd = new FormData(); fd.append('file', f);
+    await act('upload', fd);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+  const mail = async () => {
+    if (!chat?.mail_ready) { toast(t('chats.mail.off')); return; }
+    // shortcut: always sent to the signed-in person's own email (no address box yet); forward it from there if needed.
+    try { const r = await call<{ to: string }>(`chats.php?id=${openId}&a=email`, 'POST', {}); toast(`${t('chats.mail.sent')} ${r.to}`); } catch (e) { setErr((e as Error).message); }
+  };
   const del = async () => {
     if (!await confirm({ title: t('common.delete'), body: t('chats.delete.q'), danger: true, okText: t('common.delete') })) return;
     try { await call(`chats.php?id=${openId}`, 'DELETE'); location.hash = '/app/chats'; loadList(); } catch (e) { setErr((e as Error).message); }
@@ -78,10 +92,11 @@ const Chats: React.FC<{ user: User; openId: number }> = ({ user, openId }) => {
               <a href="#/app/chats" className="lg:hidden text-sm font-semibold text-indigo-600 dark:text-indigo-400">{t('chats.back')}</a>
               <div className="flex items-start gap-3 flex-wrap mt-1">
                 <div className="mr-auto">
-                  <h2 className="text-lg font-black">{c.name}</h2>
+                  <h2 className="text-lg font-black flex items-center gap-2"><span className={`w-2.5 h-2.5 rounded-full ${c.online ? 'bg-emerald-500' : 'bg-slate-300'}`} title={c.online ? t('chats.online') : t('chats.offline')} />{c.name}</h2>
                   <p className="text-xs text-slate-500">{c.status === 'closed' ? t('chats.closed') : c.mode === 'human' ? t('chats.human') : t('chats.bot')}</p>
                 </div>
                 <div className="flex gap-1 flex-wrap">
+                  <button className={btn.small} onClick={mail} title={t('chats.mail')}>✉ {t('chats.mail')}</button>
                   {c.mode === 'human' && c.status === 'open' && <button className={btn.small} onClick={() => act('bot')}>{t('chats.handback')}</button>}
                   {c.status === 'open' ? <button className={btn.small} onClick={() => act('close')}>{t('chats.close')}</button> : <button className={btn.small} onClick={() => act('reopen')}>{t('chats.reopen')}</button>}
                   {user.role === 'owner' && <button className={`${btn.small} text-red-600 border-red-300`} onClick={del}>{t('common.delete')}</button>}
@@ -100,7 +115,9 @@ const Chats: React.FC<{ user: User; openId: number }> = ({ user, openId }) => {
                 if (m.role === 'system') return <p key={m.id} className="text-center text-xs text-slate-400">{t('chats.role.system')}: {m.body}</p>;
                 return (
                   <div key={m.id} className={`max-w-[85%] ${mine ? '' : 'ml-auto'}`}>
-                    <div className={`rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${mine ? 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700' : m.role === 'agent' ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}`}>{m.body}</div>
+                    <div className={`rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${mine ? 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700' : m.role === 'agent' ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white'}`}>
+                      {m.file ? <a className="underline" href={m.file.url} target="_blank" rel="noreferrer noopener">📎 {m.file.name} <span className="opacity-70 text-xs">({Math.max(1, Math.round(m.file.size / 1024))} KB)</span>
+                        {m.file.mime.startsWith('image/') && <img src={m.file.url} alt={m.file.name} loading="lazy" className="mt-1 max-h-48 rounded-lg" />}</a> : m.body}</div>
                     {m.sources?.length > 0 && <p className="text-[11px] text-slate-500 mt-0.5">{t('chats.sources')}: {m.sources.map((s, i) => <a key={i} className="underline mr-1" href={s.url} target="_blank" rel="noreferrer noopener">{s.title || s.url}</a>)}</p>}
                     <p className={`text-[10px] text-slate-400 mt-0.5 ${mine ? '' : 'text-right'}`}>
                       {m.role === 'agent' ? m.agent_name : t(`chats.role.${m.role}` as 'chats.role.bot')} · {when(m.created_at, lang)}
@@ -111,6 +128,8 @@ const Chats: React.FC<{ user: User; openId: number }> = ({ user, openId }) => {
               <div ref={endRef} />
             </div>
             <form onSubmit={send} className="p-3 border-t border-slate-200 dark:border-slate-800 flex gap-2">
+              <input ref={fileRef} type="file" className="hidden" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv" onChange={e => upload(e.target.files?.[0])} />
+              <button type="button" className={btn.ghost} onClick={() => fileRef.current?.click()} title={t('chats.attach')} aria-label={t('chats.attach')}>📎</button>
               <textarea className={`${input} resize-none`} rows={2} value={reply} onChange={e => setReply(e.target.value)} placeholder={t('chats.reply')} aria-label={t('chats.reply')} maxLength={2000}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} />
               <button className={btn.primary} disabled={!reply.trim()}>{t('chats.send')}</button>

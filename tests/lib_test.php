@@ -4,6 +4,8 @@
 require __DIR__ . '/../api/lib/format.php';
 function db() { throw new RuntimeException('no database in tests'); }
 require __DIR__ . '/../api/lib/knowledge.php';
+require __DIR__ . '/../api/lib/mail.php';
+require __DIR__ . '/../api/lib/files.php';
 
 $fail = 0; $n = 0;
 function eq($got, $want, string $what) { global $fail, $n; $n++; if ($got !== $want) { $fail++; echo "FAIL $what\n  got:  " . var_export($got, true) . "\n  want: " . var_export($want, true) . "\n"; } }
@@ -54,6 +56,27 @@ eq(max(array_map('mb_strlen', $ch)) <= KB_CHUNK, true, 'chunks within size');
 eq(kb_chunk('tiny'), [], 'too-short text dropped');
 
 eq(kb_query('How do I return a TV?'), 'how return', 'query keeps 3+ letter words');
+
+
+// chat files: real type must match the extension; size limit; safe names
+eq(chat_file_problem('', 'a.png', 1000, 'image/png'), '', 'png ok');
+eq(chat_file_problem('', 'a.pdf', 1000, 'application/pdf'), '', 'pdf ok');
+eq(chat_file_problem('', 'a.docx', 1000, 'application/zip'), '', 'docx reported as zip ok');
+eq(chat_file_problem('', 'evil.php', 1000, 'text/x-php') !== '', true, 'php refused');
+eq(chat_file_problem('', 'evil.html', 1000, 'text/html') !== '', true, 'html refused');
+eq(chat_file_problem('', 'fake.png', 1000, 'text/html') !== '', true, 'html renamed to png refused');
+eq(chat_file_problem('', 'a.svg', 1000, 'image/svg+xml') !== '', true, 'svg refused (can carry script)');
+eq(chat_file_problem('', 'big.pdf', CHAT_FILE_MAX + 1, 'application/pdf') !== '', true, 'too big refused');
+eq(chat_file_name('../../etc/passwd'), 'passwd', 'file name has no path');
+eq(chat_file_name("bad
+name\".pdf"), 'bad_name_.pdf', 'file name has no control chars or quotes');
+
+// email: no header injection, UTF-8 subject encoded
+$m = mail_build('noreply@x.com', 'Shop', "v@y.com
+Bcc: evil@z.com", "Hi
+Bcc: evil@z.com", 'text', '<p>html</p>');
+eq(preg_match('/^Bcc:/mi', $m), 0, 'no injected Bcc header');
+eq(str_contains(mail_build('a@x.com', 'Señor', 'b@y.com', 'Café', 't', 'h'), '=?UTF-8?B?'), true, 'UTF-8 header encoded');
 
 echo $fail ? "$fail of $n FAILED\n" : "$n passed\n";
 exit($fail ? 1 : 0);

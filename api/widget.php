@@ -4,13 +4,16 @@
 //   POST ?a=start&k=KEY  {name,email,department,page}   -> {conv, token}
 //   POST ?a=say&c=ID&t=TOKEN  {text}                    -> bot answer (or waiting for a person)
 //   GET  ?a=poll&c=ID&t=TOKEN&after=MSGID               -> new bot/agent messages + mode
-//   POST ?a=human&c=ID&t=TOKEN                          -> visitor asks for a person
+//   POST ?a=human&c=ID&t=TOKEN                          -> visitor asks for a person (live if someone is online, else a message)
+//   POST ?a=email&c=ID&t=TOKEN {email, send}            -> save the visitor's email; send=1 also emails them this chat
+//   POST ?a=upload&c=ID&t=TOKEN  multipart file=...     -> visitor sends a file (picture, PDF, Word, Excel, text; 10 MB)
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
 require __DIR__ . '/lib/core.php';
 require __DIR__ . '/lib/format.php';
 require __DIR__ . '/lib/answer.php';
+require __DIR__ . '/lib/files.php';
 api_headers('GET, POST, OPTIONS');
 
 const W_NEW_CHATS_PER_IP_HOUR = 20;
@@ -47,6 +50,13 @@ function w_conv(): array {
     return $c;
 }
 
+/** Is anyone on the team online and taking live chats right now? (dashboard heartbeat within 60 s, see live.php) */
+function w_agents_online(int $tid): bool {
+    $st = db()->prepare("SELECT COUNT(*) FROM users WHERE tenant_id = ? AND status = 'active' AND available = 1 AND seen_at > UTC_TIMESTAMP() - INTERVAL 60 SECOND");
+    $st->execute([$tid]);
+    return (int)$st->fetchColumn() > 0;
+}
+
 function w_departments(array $t): array {
     return array_values(array_filter(array_map('trim', explode(',', (string)$t['departments']))));
 }
@@ -55,7 +65,8 @@ if ($a === 'config') {
     $t = w_tenant_by_key((string)($_GET['k'] ?? ''));
     w_check_site($t);
     out(['company' => $t['name'], 'color' => $t['color'], 'departments' => w_departments($t), 'ask_email' => (bool)$t['ask_email'],
-         'greeting' => $es ? ($t['greeting_es'] ?: $t['greeting_en']) : $t['greeting_en']]);
+         'greeting' => $es ? ($t['greeting_es'] ?: $t['greeting_en']) : $t['greeting_en'],
+         'live_chat' => (bool)$t['live_chat'], 'online' => $t['live_chat'] && w_agents_online((int)$t['id'])]);
 }
 
 if (method() !== 'POST' && $a !== 'poll') fail(405, 'Method not allowed');
@@ -74,9 +85,10 @@ if ($a === 'start') {
     if (!rate_ok("start:{$t['id']}:$ip", W_NEW_CHATS_PER_IP_HOUR, 3600)) fail(429, $es ? 'Demasiados chats. Inténtelo más tarde.' : 'Too many chats from here. Please try again later.');
     [$city, $region, $country] = geo($ip);
     $token = rand_key(16);
-    db()->prepare("INSERT INTO conversations (tenant_id, token, name, email, department, city, region, country, ip, page, lang, created_at, last_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?, UTC_TIMESTAMP(), UTC_TIMESTAMP())")
-        ->execute([$t['id'], $token, $name, $email, $dept, $city, $region, $country, $ip, mb_substr(str_in($b, 'page', 500), 0, 500), req_lang()]);
+    db()->prepare("INSERT INTO conversations (tenant_id, token, name, email, department, city, region, country, ip, page, lang, user_agent, created_at, last_at, visitor_seen_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP())")
+        ->execute([$t['id'], $token, $name, $email, $dept, $city, $region, $country, $ip, mb_substr(str_in($b, 'page', 500), 0, 500), req_lang(),
+                   mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255)]);
     out(['conv' => (int)db()->lastInsertId(), 'token' => $token, 'name' => $name]);
 }
 
@@ -87,8 +99,9 @@ if ($a === 'say') {
     if (!rate_ok('say:' . client_ip(), W_MSGS_PER_IP_HOUR, 3600)) fail(429, $es ? 'Demasiados mensajes. Inténtelo más tarde.' : 'Too many messages. Please try again later.');
     db()->prepare("INSERT INTO messages (conv_id, tenant_id, role, body, created_at) VALUES (?,?, 'visitor', ?, UTC_TIMESTAMP())")->execute([$c['id'], $c['tenant_id'], $text]);
     $vid = (int)db()->lastInsertId();
-    db()->prepare("UPDATE conversations SET unread = 1, status = 'open', last_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$c['id']]);
-    if ($c['mode'] === 'human') out(['id' => $vid, 'reply' => null, 'mode' => 'human']);   // a person is handling it: no bot reply
+    db()->prepare("UPDATE conversations SET unread = 1, status = 'open', emailed_at = NULL, last_at = UTC_TIMESTAMP(), visitor_seen_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$c['id']]);
+    // A person has the chat, or the visitor asked for one: the bot stays quiet and the team answers.
+    if ($c['mode'] === 'human' || $c['handoff_at']) out(['id' => $vid, 'reply' => null, 'mode' => 'human']);
 
     $st = db()->prepare("SELECT * FROM tenants WHERE id = ?");
     $st->execute([$c['tenant_id']]);
@@ -98,7 +111,7 @@ if ($a === 'say') {
         ->execute([$c['id'], $c['tenant_id'], $r['reply'], $r['sources'] ? json_encode($r['sources'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) : null, $r['answered'] ? 1 : 0, $r['via']]);
     $bid = (int)db()->lastInsertId();
     $set = ['last_at = UTC_TIMESTAMP()']; $args = [];
-    if ($r['handoff']) $set[] = 'handoff = 1';
+    if ($r['handoff']) $set[] = 'handoff = 1';   // bot could not answer: flag it for the team, but keep answering
     if ($c['topic'] === '' && $r['topic'] !== '') { $set[] = 'topic = ?'; $args[] = $r['topic']; }
     $args[] = $c['id'];
     db()->prepare("UPDATE conversations SET " . implode(', ', $set) . " WHERE id = ?")->execute($args);
@@ -107,19 +120,55 @@ if ($a === 'say') {
 
 if ($a === 'poll') {
     $c = w_conv();
-    $st = db()->prepare("SELECT id, role, body, sources, agent_name FROM messages WHERE conv_id = ? AND id > ? AND role IN ('bot','agent','system') ORDER BY id LIMIT 50");
+    db()->prepare("UPDATE conversations SET visitor_seen_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$c['id']]);   // "chatting now" on the Live board
+    $st = db()->prepare("SELECT id, role, body, sources, agent_name, file_id FROM messages WHERE conv_id = ? AND id > ? AND role IN ('bot','agent','system') ORDER BY id LIMIT 50");
     $st->execute([$c['id'], (int)($_GET['after'] ?? 0)]);
-    $rows = array_map(fn($m) => ['id' => (int)$m['id'], 'role' => $m['role'], 'body' => $m['body'], 'agent' => $m['agent_name'],
+    $rows = array_map(fn($m) => ['id' => (int)$m['id'], 'role' => $m['role'], 'body' => $m['body'], 'agent' => $m['agent_name'], 'file_id' => $m['file_id'],
                                  'sources' => $m['sources'] ? json_decode($m['sources'], true) : []], $st->fetchAll());
-    out(['messages' => $rows, 'mode' => $c['mode']]);
+    if ($rows) db()->prepare("UPDATE messages SET delivered = 1 WHERE conv_id = ? AND role = 'agent' AND id <= ?")->execute([$c['id'], end($rows)['id']]);   // seen here: no email copy needed
+    out(['messages' => chat_attach_files($rows), 'mode' => $c['mode'], 'handoff' => (bool)$c['handoff']]);
 }
 
 if ($a === 'human') {
     $c = w_conv();
-    $note = $es ? 'Listo, avisé al equipo. Una persona le responderá aquí mismo.' : "Done, I've let the team know. A person will reply right here.";
-    db()->prepare("UPDATE conversations SET handoff = 1, unread = 1, last_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$c['id']]);
+    $st = db()->prepare("SELECT live_chat FROM tenants WHERE id = ?");
+    $st->execute([$c['tenant_id']]);
+    $online = (int)$st->fetchColumn() === 1 && w_agents_online((int)$c['tenant_id']);
+    if ($online) $note = $es ? 'Le estoy conectando con una persona del equipo. Le responderá aquí mismo en un momento.'
+                             : "I'm connecting you with a person on our team. They'll reply right here in a moment.";
+    elseif ($c['email'] !== '') $note = $es ? "Nadie del equipo está disponible ahora. Le responderemos por correo a {$c['email']}. Escriba su mensaje aquí."
+                                           : "No one on our team is available right now. We'll reply by email to {$c['email']}. Type your message here.";
+    else $note = $es ? 'Nadie del equipo está disponible ahora. Déjenos su correo y su mensaje, y le responderemos.'
+                     : "No one on our team is available right now. Leave your email and your message, and we'll get back to you.";
+    db()->prepare("UPDATE conversations SET handoff = 1, unread = 1, handoff_at = COALESCE(handoff_at, UTC_TIMESTAMP()), alerted_at = NULL, last_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$c['id']]);
     db()->prepare("INSERT INTO messages (conv_id, tenant_id, role, body, created_at) VALUES (?,?, 'system', ?, UTC_TIMESTAMP())")->execute([$c['id'], $c['tenant_id'], $note]);
-    out(['id' => (int)db()->lastInsertId(), 'reply' => $note]);
+    out(['id' => (int)db()->lastInsertId(), 'reply' => $note, 'online' => $online, 'need_email' => $c['email'] === '']);
+}
+
+if ($a === 'email') {
+    $c = w_conv();
+    $b = body();
+    $typed = trim((string)($b['email'] ?? ''));
+    $email = $typed !== '' ? fmt_email($typed) : $c['email'];
+    if ($email === '') fail(400, $es ? 'Ese correo no parece válido.' : 'That email address does not look right.');
+    if (!rate_ok('email:' . $c['id'], 5, 3600)) fail(429, $es ? 'Demasiadas solicitudes. Inténtelo más tarde.' : 'Too many requests. Please try again later.');
+    $send = !empty($b['send']);
+    db()->prepare("UPDATE conversations SET email = ?" . ($send ? ", visitor_mail_at = UTC_TIMESTAMP()" : '') . " WHERE id = ?")->execute([$email, $c['id']]);
+    out(['ok' => true, 'email' => $email,
+         'reply' => $send ? ($es ? "Le enviaremos una copia de este chat a $email." : "We'll email a copy of this chat to $email.")
+                          : ($es ? "Gracias. Le responderemos a $email." : "Thanks. We'll reply to $email.")]);
+}
+
+if ($a === 'upload') {
+    $c = w_conv();
+    if (!rate_ok('upload:' . client_ip(), 20, 3600)) fail(429, $es ? 'Demasiados archivos. Inténtelo más tarde.' : 'Too many files. Please try again later.');
+    if (empty($_FILES['file'])) fail(400, $es ? 'Elija un archivo.' : 'Choose a file.');
+    $f = chat_file_save($_FILES['file'], (int)$c['tenant_id'], (int)$c['id']);
+    db()->prepare("INSERT INTO messages (conv_id, tenant_id, role, body, file_id, created_at) VALUES (?,?, 'visitor', ?, ?, UTC_TIMESTAMP())")
+        ->execute([$c['id'], $c['tenant_id'], '📎 ' . $f['name'], $f['id']]);
+    $mid = (int)db()->lastInsertId();
+    db()->prepare("UPDATE conversations SET unread = 1, status = 'open', emailed_at = NULL, last_at = UTC_TIMESTAMP() WHERE id = ?")->execute([$c['id']]);
+    out(['id' => $mid, 'file' => $f]);
 }
 
 fail(400, 'Unknown action.');

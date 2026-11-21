@@ -167,6 +167,23 @@ function kb_store(int $tid, int $sid, string $title, string $url, string $text):
     return $n;
 }
 
+/** Text from an uploaded Word (.docx) or text file. Word: paragraphs from word/document.xml (no outside tools). */
+function kb_doc_text(string $file): string {
+    if (str_ends_with($file, '.docx')) {
+        $z = new ZipArchive();
+        if ($z->open($file) !== true) throw new RuntimeException('Could not open this Word file.');
+        $xml = (string)$z->getFromName('word/document.xml');
+        $z->close();
+        if ($xml === '') throw new RuntimeException('This Word file has no text.');
+        if (strlen($xml) > 30000000) throw new RuntimeException('This Word file is too large to read.');   // zip bomb guard
+        $xml = preg_replace(['~</w:p>~', '~<w:tab/>~', '~<w:br[^>]*/>~'], ["\n\n", "\t", "\n"], $xml);
+        return trim(html_entity_decode(strip_tags($xml), ENT_QUOTES | ENT_XML1, 'UTF-8'));
+    }
+    $t = (string)file_get_contents($file, false, null, 0, 2000000);
+    if (!mb_check_encoding($t, 'UTF-8')) $t = mb_convert_encoding($t, 'UTF-8', 'Windows-1252');   // older Windows text files
+    return trim(preg_replace('/^\xEF\xBB\xBF/', '', $t));
+}
+
 /** Process one queued source (worker.php). Throws on failure; the caller records the error. */
 function kb_process(array $s, int $maxPages): array {
     $tid = (int)$s['tenant_id']; $sid = (int)$s['id'];
@@ -179,6 +196,13 @@ function kb_process(array $s, int $maxPages): array {
         $text = (string)shell_exec('pdftotext -layout -enc UTF-8 ' . escapeshellarg($file) . ' - 2>/dev/null');
         if (trim($text) === '') throw new RuntimeException('No text found in this PDF (scanned pages are not supported yet).');
         $pages = max(1, substr_count($text, "\f"));
+        $chars = kb_store($tid, $sid, $title, '', $text);
+    } elseif ($s['kind'] === 'doc') {
+        $file = jcb_home() . '/uploads/' . basename($s['file']);
+        if (!is_file($file)) throw new RuntimeException('The uploaded file is missing.');
+        $text = kb_doc_text($file);
+        if (trim($text) === '') throw new RuntimeException('No text found in this file.');
+        $pages = 1;
         $chars = kb_store($tid, $sid, $title, '', $text);
     } else {
         $urls = $s['kind'] === 'site' ? kb_site_urls($s['url'], $maxPages) : [$s['url']];

@@ -4,7 +4,7 @@ import { useT } from '../../i18n';
 import { when } from '../../format';
 import { btn, Card, Err, input, useDialog } from '../../ui';
 
-type Src = { id: number; kind: 'site' | 'url' | 'text' | 'pdf'; title: string; url: string; status: 'queued' | 'working' | 'ready' | 'error'; error: string; pages: number; chars: number; chunks: number; updated_at: string };
+type Src = { id: number; kind: 'site' | 'url' | 'text' | 'pdf' | 'doc'; title: string; url: string; status: 'queued' | 'working' | 'ready' | 'error'; error: string; pages: number; chars: number; chunks: number; updated_at: string };
 const BADGE = { queued: 'bg-slate-200 dark:bg-slate-700', working: 'bg-amber-200 text-amber-900', ready: 'bg-emerald-200 text-emerald-900', error: 'bg-red-200 text-red-900' };
 
 const Knowledge: React.FC = () => {
@@ -40,7 +40,7 @@ const Knowledge: React.FC = () => {
   };
   const refresh = async (s: Src) => { try { await call(`sources.php?id=${s.id}&a=refresh`, 'POST'); load(); } catch (x) { setErr((x as Error).message); } };
 
-  const modes = [['site', t('kb.site')], ['url', t('kb.url')], ['text', t('kb.text')], ['pdf', t('kb.pdf')]] as const;
+  const modes = [['site', t('kb.site')], ['url', t('kb.url')], ['text', t('kb.text')], ['pdf', t('kb.doc')]] as const;
   return (
     <div className="space-y-4">
       {data && !data.ai_ready && <p className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 px-3 py-2 text-sm">{t('kb.noai')}</p>}
@@ -59,9 +59,9 @@ const Knowledge: React.FC = () => {
             <button className={btn.primary} disabled={busy}>{t('kb.addtext')}</button>
           </>}
           {mode === 'pdf' && <>
-            <input type="file" accept="application/pdf,.pdf" onChange={e => setFile(e.target.files?.[0] || null)} className="text-sm" aria-label={t('kb.pdf')} />
-            <p className="text-xs text-slate-500">{t('kb.pdf.hint')}</p>
-            <button className={btn.primary} disabled={busy || !file}>{t('kb.pdf')}</button>
+            <input type="file" accept=".pdf,.docx,.txt,.md,.csv,application/pdf" onChange={e => setFile(e.target.files?.[0] || null)} className="text-sm" aria-label={t('kb.doc')} />
+            <p className="text-xs text-slate-500">{t('kb.doc.hint')}</p>
+            <button className={btn.primary} disabled={busy || !file}>{t('kb.doc')}</button>
           </>}
         </form>
         <div className="mt-3"><Err msg={err} /></div>
@@ -72,7 +72,7 @@ const Knowledge: React.FC = () => {
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {data.sources.map(s => (
               <li key={s.id} className="py-2.5 flex items-center gap-3 flex-wrap">
-                <span className="text-lg" aria-hidden>{{ site: '🌐', url: '📄', text: '📝', pdf: '📕' }[s.kind]}</span>
+                <span className="text-lg" aria-hidden>{{ site: '🌐', url: '📄', text: '📝', pdf: '📕', doc: '📘' }[s.kind]}</span>
                 <div className="flex-1 min-w-[12rem]">
                   <p className="font-semibold text-sm truncate">{s.title || s.url}</p>
                   <p className="text-xs text-slate-500 truncate">{s.url && <a className="underline mr-2" href={s.url} target="_blank" rel="noreferrer noopener">{s.url}</a>}

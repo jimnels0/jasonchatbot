@@ -18,6 +18,31 @@ Product name is NOT decided: the placeholder "Jason Chatbot" lives in one consta
   150 chars and duplicate pages, and if a whole site is thin it says so and asks for pasted text or a PDF.
   shortcut: no headless-browser rendering; add it if many customers hit this.
 
+## Live chat, email, files, Live board (2026-11-21, v0.2)
+- **AI + live chat in one widget:** the bot answers first; "Talk to a person" connects a live team member when someone
+  is ONLINE (dashboard open, heartbeat `live.php` every 10 s, users.seen_at < 60 s, and their own Available switch on).
+  Nobody online -> the widget says so and asks for an email (offline message). After the visitor asks for a person the
+  bot stays quiet (`conversations.handoff_at` set). A bot "I don't know" only flags `handoff` and keeps answering.
+  First team reply posts "<name> joined the chat." The dashboard chimes + desktop notification + "(n)" in the tab title
+  when a new visitor is waiting (even in a background tab).
+- **Live now tab** (`api/live.php?full=1`, `web/src/pages/dash/Live.tsx`): who is chatting right now (widget open within
+  45 s) with name, email, location, department, topic, start time, minutes, page, device (from the user agent), and the
+  last 24 hours as a time line. Agents see it too.
+- **Files in chat:** visitor (📎 in the widget) and team (📎 in Chats) send pictures, PDF, Word, Excel, text, 10 MB.
+  Real type checked with finfo + extension allow-list (no SVG/HTML), stored OUTSIDE the web root in `/home/jcbot/chatfiles`,
+  served only by `api/files.php?f=ID&k=KEY` (32-hex key, nosniff, sandbox CSP, non-images download). `lib/files.php`.
+- **Knowledge uploads:** PDF, Word (.docx, read with ZipArchive) and text (.txt/.md/.csv); `sources.kind` 'doc'.
+- **Email** (`lib/mail.php` SMTP, `lib/transcript.php`, all sent by `worker.php` so chats never wait on mail):
+  team alert when a visitor asked for a person and nobody took it within 1 min; "Email me this chat" for visitors;
+  team replies the visitor never saw (widget closed 2+ min) emailed to them; full transcript of every finished chat
+  (idle 30 min or closed) to the company. "Email this chat" button in Chats sends to the signed-in person. Settings >
+  Live chat and email: on/off switches + up to 5 alert/transcript addresses (empty = owner). Old chats were marked as
+  already emailed by the migration (no flood).
+- **EMAIL IS OFF until the server has a mailbox login:** `ssh -t jcb "bash ~/setmail.sh"` (asks server, port, mailbox,
+  hidden password, sender name, test address; writes `$smtp_*` into jcb-config.php, sends a test). Suggested sender:
+  noreply@pennybiddeals.com (SiteGround, gtxm1041.siteground.biz:465) until the product has its own domain.
+- Schema changes go in `UPGRADES` in `lib/schema.php` (migrate.php adds missing columns).
+
 ## Where it runs (v0.1, 2026-11-21)
 - **Temp domain:** https://bot.pennybiddeals.com (Cloudflare A record `bot` -> 108.181.184.22, proxied; the Penny
   wildcard origin cert covers it). Replace with the real domain later: CloudPanel site + Cloudflare + `vite.config.ts` proxy + widget docs.
@@ -53,8 +78,10 @@ EN+ES strings (`web/src/i18n.ts`), themed dialogs only (`useDialog`, no alert/co
 outside-USA gate for the dashboard site with blocked visits logged (widget not gated: customers' visitors), never put secrets in git.
 
 ## Tests
-`php tests/lib_test.php` (needs mbstring, run on jasonvps): formatting, link resolving, SSRF guard, HTML->text, chunking. 33 checks.
+`php tests/lib_test.php` (needs mbstring, run on jasonvps): formatting, link resolving, SSRF guard, HTML->text, chunking,
+chat-file type checks, email header injection. 45 checks. Live chat/files/email flows were tested with curl on 2026-11-21.
 
 ## Not built yet (next)
-Stripe billing (plans are set by hand in the Owner console), emails (invites, password reset, handoff alerts: needs a sender),
+Stripe billing (plans are set by hand in the Owner console), invite + password-reset emails (the mail code exists now),
+choose the address for "Email this chat", typing indicators, canned replies for agents, chat transfer between agents,
 vector search, streamed answers, 2FA, CSV export, browser tests (Playwright), Terms/Privacy are DRAFTS for the lawyer.

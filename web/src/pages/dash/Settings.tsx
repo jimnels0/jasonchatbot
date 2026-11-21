@@ -5,7 +5,8 @@ import { titleCase, titleCaseList } from '../../format';
 import { btn, Card, Err, input, label, useDialog } from '../../ui';
 
 export type Tenant = { id: number; public_key: string; name: string; website: string; color: string; greeting_en: string; greeting_es: string; tone: string;
-  departments: string; allowed_domains: string; ask_email: number; plan: string; msg_limit: number; max_pages: number; answers_this_month: number };
+  departments: string; allowed_domains: string; ask_email: number; plan: string; msg_limit: number; max_pages: number; answers_this_month: number;
+  live_chat: number; notify_emails: string; email_transcripts: number; email_alerts: number; mail_ready: boolean };
 
 const Settings: React.FC = () => {
   const { t } = useT();
@@ -39,6 +40,18 @@ const Settings: React.FC = () => {
           <div><label className={label} htmlFor="gs">{t('set.greet.es')}</label><input id="gs" className={input} value={f.greeting_es} onChange={set('greeting_es')} maxLength={300} /></div>
           <div><label className={label} htmlFor="st">{t('set.tone')}</label><textarea id="st" className={input} rows={4} value={f.tone} onChange={set('tone')} placeholder={t('set.tone.ph')} maxLength={600} /></div>
           <p className="text-sm text-slate-500">{t('set.plan')}: <b className="capitalize">{f.plan}</b> · {t('set.usage')}: <b>{f.answers_this_month}</b> / {f.msg_limit.toLocaleString()}</p>
+        </div>
+      </Card>
+      <Card title={t('set.live')} className="lg:col-span-2">
+        <div className="space-y-3">
+          {!f.mail_ready && <p className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 px-3 py-2 text-sm">{t('set.mail.off')}</p>}
+          <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={!!f.live_chat} onChange={e => setF({ ...f, live_chat: e.target.checked ? 1 : 0 })} />{t('set.live.on')}</label>
+          <p className="text-xs text-slate-500">{t('set.live.hint')}</p>
+          <div><label className={label} htmlFor="ne">{t('set.notify')}</label>
+            <input id="ne" className={input} value={f.notify_emails} onChange={set('notify_emails')} onBlur={() => setF({ ...f, notify_emails: f.notify_emails.toLowerCase().replace(/\s+/g, '') .replace(/,/g, ', ') })} maxLength={600} placeholder="sales@yourcompany.com, you@yourcompany.com" />
+            <p className="text-xs text-slate-500 mt-1">{t('set.notify.hint')}</p></div>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!f.email_transcripts} onChange={e => setF({ ...f, email_transcripts: e.target.checked ? 1 : 0 })} />{t('set.transcripts')}</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!f.email_alerts} onChange={e => setF({ ...f, email_alerts: e.target.checked ? 1 : 0 })} />{t('set.alerts')}</label>
         </div>
       </Card>
       <div className="lg:col-span-2 flex items-center gap-3"><button className={btn.primary}>{t('common.save')}</button><div className="flex-1"><Err msg={err} /></div></div>
