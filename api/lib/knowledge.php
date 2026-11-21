@@ -4,6 +4,7 @@
 // shortcut: keyword search, no embeddings; move to vector search (jasonchatbot.md) when answers miss on wording.
 const KB_CHUNK = 1200;            // characters per chunk
 const KB_MAX_PAGE_BYTES = 2000000;
+const KB_MIN_PAGE_TEXT = 150;     // characters; less than this is a menu/shell page, not knowledge
 const KB_UA = 'JasonChatbotCrawler/0.1 (+https://bot.pennybiddeals.com)';
 
 function jcb_home(): string { return dirname(__DIR__, 4); }   // /home/jcbot on the server
@@ -34,7 +35,10 @@ function kb_chunk(string $text): array {
 /** HTML -> [title, readable text]. Scripts, styles, menus and cookie banners are dropped; footers stay (addresses, hours). */
 function kb_html_text(string $html): array {
     $title = preg_match('#<title[^>]*>(.*?)</title>#is', $html, $m) ? trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8')) : '';
-    $h = preg_replace('#<(script|style|noscript|svg|template|iframe|nav)\b.*?</\1>#is', ' ', $html);
+    // Drop <head> (the title is kept above) so a page's title isn't counted as its text. <noscript> is KEPT: on
+    // JavaScript-built sites it is often the only readable text.
+    $h = preg_replace('#<head\b.*?</head>#is', ' ', $html);
+    $h = preg_replace('#<(script|style|svg|template|iframe|nav)\b.*?</\1>#is', ' ', $h);
     $h = preg_replace('#<!--.*?-->#s', ' ', $h);
     $h = preg_replace('#<(br|/p|/div|/li|/h[1-6]|/tr|/section|/article|/header|/footer|/table|/ul|/ol|/blockquote)\b[^>]*>#i', "\n", $h);
     $h = preg_replace('#<(h[1-6])\b[^>]*>#i', "\n\n", $h);
@@ -179,16 +183,23 @@ function kb_process(array $s, int $maxPages): array {
     } else {
         $urls = $s['kind'] === 'site' ? kb_site_urls($s['url'], $maxPages) : [$s['url']];
         if (!$urls) throw new RuntimeException('Could not read that website (no pages found).');
+        $seen = []; $thin = 0;
         foreach ($urls as $u) {
             $r = kb_fetch($u);
             if (!$r || !str_contains($r[1], 'html')) continue;
             [$t, $text] = kb_html_text($r[2]);
-            if (mb_strlen($text) < 40) continue;
+            if (mb_strlen($text) < KB_MIN_PAGE_TEXT) { $thin++; continue; }
+            $h = md5(preg_replace('/\s+/u', ' ', $text));   // many sites repeat the same shell on every address
+            if (isset($seen[$h])) continue;
+            $seen[$h] = true;
             $chars += kb_store($tid, $sid, $t !== '' ? $t : $r[0], $r[0], $text);
             $pages++;
             if ($title === '' && $t !== '') $title = $t;
         }
-        if ($pages === 0) throw new RuntimeException('Could not read any text from that address.');
+        // shortcut: no headless browser; JavaScript-built pages are reported, not rendered. Add rendering if many customers hit this.
+        if ($pages === 0) throw new RuntimeException($thin
+            ? 'These pages have almost no readable text. The website is probably built with JavaScript, so its text only appears in a browser. Paste your FAQ or About text, or upload a PDF, instead.'
+            : 'Could not read any text from that address.');
     }
     return [$pages, $chars, $title];
 }

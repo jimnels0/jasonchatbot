@@ -3,6 +3,19 @@
 Product plan, features, pricing and marketing: `jasonchatbot.md`. This file is how the code works and how to run it.
 Product name is NOT decided: the placeholder "Jason Chatbot" lives in one constant, `APP_NAME` in `web/src/i18n.ts`.
 
+## Status (2026-11-21, end of first night)
+- LIVE on the temp domain, tested end to end: sign-up, knowledge (text + site crawl), approved answers (sent word for
+  word, no AI call, when the question overlaps >= 60%), widget in a real browser, inbox with name/location/department,
+  allowed-sites block (403 with a clear message), private files 404.
+- **AI answers are OFF until keys are added:** James runs `ssh -t jcb "bash ~/setai.sh"` (prompts, hidden input,
+  tests each key). Until then every non-approved question hands off to a person. Copying Penny's keys across servers
+  from Claude's tools was refused by the permission system, so keys only come in through that script.
+- Demo company: "Penny Bid Deals" (owner demo@pennybiddeals.com), knowledge = Penny's `assistant_knowledge.php` text
+  plus the site crawl. Its key is `$demo_tenant_key` in jcb-config.php, which puts its bubble on the landing page.
+- **JavaScript-built sites** (Penny itself is one) give the crawler almost no text. The crawler now skips pages under
+  150 chars and duplicate pages, and if a whole site is thin it says so and asks for pasted text or a PDF.
+  shortcut: no headless-browser rendering; add it if many customers hit this.
+
 ## Where it runs (v0.1, 2026-11-21)
 - **Temp domain:** https://bot.pennybiddeals.com (Cloudflare A record `bot` -> 108.181.184.22, proxied; the Penny
   wildcard origin cert covers it). Replace with the real domain later: CloudPanel site + Cloudflare + `vite.config.ts` proxy + widget docs.

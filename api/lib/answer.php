@@ -5,6 +5,26 @@ require_once __DIR__ . '/ai.php';
 require_once __DIR__ . '/knowledge.php';
 
 const ANSWER_HISTORY = 8;
+const QA_DIRECT_MIN = 0.6;   // word overlap (Jaccard) needed to send an approved answer as is
+
+function qa_words(string $s): array {
+    $w = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($s), -1, PREG_SPLIT_NO_EMPTY);
+    return array_values(array_unique(array_filter($w, fn($x) => mb_strlen($x) > 2)));
+}
+
+/** The approved answer whose QUESTION best matches $msg, if the overlap is high enough; else null. */
+function qa_direct(string $msg, array $qa): ?array {
+    $m = qa_words($msg);
+    if (count($m) < 2) return null;
+    $best = null; $bestScore = 0.0;
+    foreach ($qa as $r) {
+        $q = qa_words($r['question']);
+        $union = count(array_unique(array_merge($m, $q)));
+        $score = $union ? count(array_intersect($m, $q)) / $union : 0;
+        if ($score > $bestScore) { $bestScore = $score; $best = $r; }
+    }
+    return $bestScore >= QA_DIRECT_MIN ? $best : null;
+}
 
 /** Returns ['reply','sources'=>[{title,url}],'handoff'=>bool,'answered'=>bool,'via','topic']. */
 function answer_message(array $tenant, array $conv): array {
@@ -32,6 +52,13 @@ function answer_message(array $tenant, array $conv): array {
 
     $userText = implode(' ', array_map(fn($t) => $t['content'], array_slice(array_values(array_filter($turns, fn($t) => $t['role'] === 'user')), -2)));
     $qa = qa_search($tid, $userText);
+
+    // An approved answer whose question closely matches this message is sent word for word: no model call, no charge.
+    // English only (approved answers are written in English; a Spanish chat goes through the model, which translates).
+    if (!$es && $qa) {
+        $hit = qa_direct((string)end($turns)['content'], $qa);
+        if ($hit) return ['reply' => $hit['answer'], 'sources' => [], 'handoff' => false, 'answered' => true, 'via' => 'qa', 'topic' => ''];
+    }
     $chunks = kb_search($tid, $userText);
 
     $qaText = $qa ? implode("\n\n", array_map(fn($r) => "Q: {$r['question']}\nA: {$r['answer']}", $qa)) : '(none)';
