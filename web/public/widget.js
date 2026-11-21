@@ -222,13 +222,28 @@
     clip.addEventListener('click', function () { if (chat) fileIn.click(); });
     fileIn.addEventListener('change', function () {
       var f = fileIn.files && fileIn.files[0]; fileIn.value = '';
+      sendFile(f);
+    });
+    // Ctrl+V / Cmd+V of a screenshot or copied picture sends it like the paperclip. Pasted text still types normally.
+    box.addEventListener('paste', function (e) {
+      var items = (e.clipboardData && e.clipboardData.items) || [];
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].kind === 'file' && /^image\//.test(items[i].type)) {
+          var f = items[i].getAsFile(); if (!f) continue;
+          e.preventDefault();
+          if (!f.name || f.name === 'image.png') f = new File([f], 'pasted-' + Date.now() + '.' + (f.type.split('/')[1] || 'png'), { type: f.type });
+          sendFile(f); return;
+        }
+      }
+    });
+    function sendFile(f) {
       if (!f || !chat) return;
       if (f.size > 10 * 1024 * 1024) { line('system', lang === 'es' ? 'Ese archivo es muy grande (máximo 10 MB).' : 'That file is too big (10 MB maximum).'); return; }
       var wait = line('system', S.sending); var fd = new FormData(); fd.append('file', f);
       req('POST', 'a=upload&c=' + chat.conv + '&t=' + chat.token, fd).then(function (j) {
         wait.remove(); line('user', '', null, j.file); remember('user', '📎 ' + j.file.name, null, null, j.file);
       }).catch(function (x) { wait.textContent = x.message; });
-    });
+    }
     newBtn.addEventListener('click', function () { put(null); chat = null; intro(); });
     closeBtn.addEventListener('click', function () { panel.style.display = 'none'; stopPoll(); bubble.focus(); });
     bubble.addEventListener('click', function () {

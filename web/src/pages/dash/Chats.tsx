@@ -46,6 +46,13 @@ const Chats: React.FC<{ user: User; openId: number }> = ({ user, openId }) => {
     await act('upload', fd);
     if (fileRef.current) fileRef.current.value = '';
   };
+  // Ctrl+V of a screenshot in the reply box sends it as a file; pasted text types normally.
+  const pasteImage = (e: React.ClipboardEvent) => {
+    const item = Array.from(e.clipboardData.items).find(i => i.kind === 'file' && i.type.startsWith('image/'));
+    const f = item?.getAsFile(); if (!f) return;
+    e.preventDefault();
+    upload(new File([f], `pasted-${Date.now()}.${f.type.split('/')[1] || 'png'}`, { type: f.type }));
+  };
   const mail = async () => {
     if (!chat?.mail_ready) { toast(t('chats.mail.off')); return; }
     // shortcut: always sent to the signed-in person's own email (no address box yet); forward it from there if needed.
@@ -130,7 +137,7 @@ const Chats: React.FC<{ user: User; openId: number }> = ({ user, openId }) => {
             <form onSubmit={send} className="p-3 border-t border-slate-200 dark:border-slate-800 flex gap-2">
               <input ref={fileRef} type="file" className="hidden" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv" onChange={e => upload(e.target.files?.[0])} />
               <button type="button" className={btn.ghost} onClick={() => fileRef.current?.click()} title={t('chats.attach')} aria-label={t('chats.attach')}>📎</button>
-              <textarea className={`${input} resize-none`} rows={2} value={reply} onChange={e => setReply(e.target.value)} placeholder={t('chats.reply')} aria-label={t('chats.reply')} maxLength={2000}
+              <textarea className={`${input} resize-none`} rows={2} value={reply} onChange={e => setReply(e.target.value)} onPaste={pasteImage} placeholder={t('chats.reply')} aria-label={t('chats.reply')} maxLength={2000}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.currentTarget.form as HTMLFormElement).requestSubmit(); } }} />
               <button className={btn.primary} disabled={!reply.trim()}>{t('chats.send')}</button>
             </form>
